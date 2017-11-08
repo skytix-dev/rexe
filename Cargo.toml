@@ -1,0 +1,19 @@
+[package]
+name = "rexe"
+version = "0.1.0"
+authors = ["Marc Dergacz <marc@skytix.com.au>"]
+
+[dependencies]
+ctrlc = { version = "3.0", features = ["termination"] }
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+hyper = "0.11"
+futures = "0.1"
+tokio-core = "0.1"
+clap = "^2"
+log = "0.3.8"
+env_logger = "0.4.3"
+regex = "0.2"
+rand = "0.3"
+base64 = "0.7.0"
