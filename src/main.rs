@@ -19,6 +19,8 @@ mod types;
 use clap::{Arg, App, ArgMatches};
 use types::RequestedTaskInfo;
 
+pub static mut VERBOSE_OUTPUT: bool = false;
+
 fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     let cpus_param = matches.value_of("cpus").unwrap().parse::<f32>();
     let cpus: f32;
@@ -158,6 +160,11 @@ fn main() {
                 .required(false)
                 .help("Specify the number of GPUs required")
                 .takes_value(true))
+            .arg(Arg::with_name("verbose")
+                .short("v")
+                .required(false)
+                .help("Verbose output")
+                .takes_value(false))
             .arg(Arg::with_name("IMAGE")
                 .help("Name of docker image")
                 .required(true)
@@ -174,7 +181,24 @@ fn main() {
         let mesos_master = matches.value_of("mesos").unwrap();
         let task_info = generate_task_info(&matches);
 
-        println!("Executing task {}", mesos_master);
+        unsafe {
+
+            match matches.value_of("verbose") {
+
+                Some(value) => {
+                    VERBOSE_OUTPUT = true;
+                },
+                _ => {
+                    VERBOSE_OUTPUT = false;
+                }
+
+            }
+
+            if VERBOSE_OUTPUT {
+                println!("Executing task {}", mesos_master);
+            }
+
+        }
 
         scheduler::execute(&mesos_master, &task_info);
 

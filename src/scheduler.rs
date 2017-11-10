@@ -15,6 +15,7 @@ use hyper::StatusCode;
 use hyper::client::HttpConnector;
 use hyper::header::{Headers, ContentType};
 use hyper::mime::Mime;
+use hyper::Uri;
 use tokio_core::reactor::Core;
 use serde_json;
 use serde_json::{Value};
@@ -30,7 +31,7 @@ enum SchedulerState {
     Started,
     Subscribed,
     Scheduled { agent_id: String, task_id: String },
-    Running,
+    Running { agent_id: String, task_id: String, sandbox_path: String },
 }
 
 pub struct Scheduler<'a, 'b: 'a> {
@@ -60,7 +61,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
         match self.state {
             SchedulerState::Scheduled { ref agent_id, ref task_id } => true,
-            SchedulerState::Running => true,
+            SchedulerState::Running { ref agent_id, ref task_id, ref sandbox_path } => true,
             _ => false
         }
         
@@ -80,8 +81,13 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                 let framework_id = value["subscribed"]["framework_id"]["value"].as_str().unwrap();
                 self.set_subscribed(String::from(framework_id));
 
-                println!("Subscribed to Mesos with framework_id: {}", self.framework_id);
-                
+                unsafe {
+
+                    if ::VERBOSE_OUTPUT {
+                        println!("Subscribed to Mesos with framework_id: {}", self.framework_id);
+                    }
+
+                }
             },
             "OFFERS" => {
 
@@ -137,27 +143,36 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                         },
                         "TASK_RUNNING" => {
                             // We need to get the uuid from the message to send an acknowledgement of it.
+                            let mut set_running: bool = false;
+                            let mut this_agent_id: String;
+                            let mut this_task_id: String;
+
+                            match self.state {
+
+                                SchedulerState::Scheduled {ref agent_id, ref task_id} => {
+                                    // Acknowledge the message and change our status
+                                    this_agent_id = String::from(agent_id.as_str());
+                                    this_task_id = String::from(task_id.as_str());
+                                    set_running = true;
+                                },
+                                SchedulerState::Running {ref agent_id, ref task_id, ref sandbox_path } => {
+                                    // Just acknowledge So we dont get spammed.
+                                    this_agent_id = String::from(agent_id.as_str());
+                                    this_task_id = String::from(task_id.as_str());
+                                },
+                                _ => {
+                                    // Not sure what to do here yet.
+                                    this_agent_id = String::from("");
+                                    this_task_id = String::from("");
+                                }
+
+                            }
+
                             match value["update"]["status"]["uuid"].as_str() {
 
                                 Some(uuid) => {
                                     // Send acknowledgement.
-                                    let mut set_running: bool = false;
-
-                                    match self.state {
-
-                                        SchedulerState::Scheduled {ref agent_id, ref task_id} => {
-                                            // Acknowledge the message and change our status
-                                            set_running = true;
-                                            self.acknowledge(self.framework_id.as_str(), agent_id.as_str(), task_id.as_str(), uuid);
-                                        },
-                                        _ => {
-                                            // Just acknowledge So we dont get spammed.
-                                        }
-                                    }
-
-                                    if set_running {
-                                        self.set_running();
-                                    }
+                                    self.acknowledge(self.framework_id.as_str(), this_agent_id.as_str(), this_task_id.as_str(), uuid);
                                 },
                                 None => {
                                     // Do nothing.
@@ -165,19 +180,36 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
                             };
 
-                            println!("Message:\n{}", message);
-
                             let bytes = value["update"]["status"]["data"].as_str();
                             let data: Vec<u8> = decode(bytes.unwrap()).unwrap();
                             let unwrapped = &String::from_utf8(data).unwrap();
-
-                            println!("Running response:\n{}", unwrapped);
-
                             let value: Value = serde_json::from_str(unwrapped).unwrap();
+
+                            if set_running {
+                                // We need to get the executor ID
+                                let this_sandbox_path = String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap());
+                                self.set_running(this_agent_id.as_str(), this_task_id.as_str(), this_sandbox_path.as_str());
+                            }
 
                         }
                         "TASK_FINISHED" => {
                             // Finished.  Return no error.  We need to get stdout for it.
+
+                            match self.state {
+
+                                SchedulerState::Running {ref agent_id, ref task_id, ref sandbox_path} => {
+                                    let mut this_sandbox_path: String = String::from(sandbox_path.as_str());
+
+                                    this_sandbox_path.push_str("/stdout");
+
+                                    self.output_stdout(this_sandbox_path.as_str());
+                                },
+                                _ => {
+                                    println!("Unable to output STDOUT due to inconsistent state.  TASK_FINISHED received before app was marked as running.");
+                                }
+
+                            }
+
                             self.deregister_exit(0);
                         },
                         _ => println!("Unhandled update state: {}\n{}", state, message),
@@ -192,6 +224,55 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             _ => println!("Unhandled event message: {}", message),
         };
 
+    }
+
+    fn output_stdout(&self, sandbox_path: &str) {
+        let mut core = Core::new().unwrap();
+        let client: Client<HttpConnector> = Client::new(&core.handle());
+
+        let mime: Mime = "application/json".parse().unwrap();
+
+        let mut scheduler_url: String = String::from(self.scheduler_url);
+        scheduler_url.push_str("/files/download?path=");
+        scheduler_url.push_str(str::replace(sandbox_path, "/", "%2F").as_str());
+
+        println!("URL: {}", scheduler_url);
+
+        let mut request = Request::new(Method::Get, scheduler_url.parse().unwrap());
+
+        let work = client.request(request).and_then(|response: Response| {
+
+            match response.status() {
+                StatusCode::Ok => {
+                    response.body().concat2()
+                        .and_then(move |body| {
+                            let stringify = from_utf8(&body).unwrap();
+                            println!("{}", stringify);
+                            futures::future::ok(())
+                        }
+                        ).wait();
+                },
+
+                _ => {
+                    let status_code = &response.status().as_u16();
+
+                    response.body().concat2()
+                        .and_then(move |body| {
+
+
+                            let stringify = from_utf8(&body).unwrap();
+                            error!("Error:\n\n {}\n{}", status_code, stringify);
+                            futures::future::ok(())
+                        }
+                        ).wait();
+
+                },
+            };
+
+            Ok(())
+        });
+
+        core.run(work);
     }
 
     fn deregister_exit(&self, exit_code: i32) {
@@ -216,8 +297,8 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
     }
 
-    fn set_running(&mut self) {
-        self.state = SchedulerState::Running;
+    fn set_running(&mut self, agent_id: &str, task_id: &str, executor_id: &str) {
+        self.state = SchedulerState::Running { agent_id: String::from(agent_id), task_id: String::from(task_id), sandbox_path: String::from(executor_id)};
     }
 
     fn accept_offer(&mut self, offer: &types::Offer) {
@@ -275,7 +356,11 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         let client: Client<HttpConnector> = Client::new(&core.handle());
 
         let mime: Mime = "application/json".parse().unwrap();
-        let mut request = Request::new(Method::Post, self.scheduler_url.parse().unwrap());
+
+        let mut scheduler_url: String = String::from(self.scheduler_url);
+        scheduler_url.push_str("/api/v1/scheduler");
+
+        let mut request = Request::new(Method::Post, scheduler_url.parse().unwrap());
 
         request.headers_mut().set(ContentType(mime));
         request.headers_mut().set(MesosStreamId(String::from(&*self.stream_id)));
@@ -345,13 +430,22 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
     let client: Client<HttpConnector> = Client::new(&core.handle());
 
     scheduler_uri.push_str(mesos_host);
-    scheduler_uri.push_str("/api/v1/scheduler");
 
-    let url : &str = &scheduler_uri[..];
+    let mut scheduler_path = scheduler_uri.clone();
+    scheduler_path.push_str("/api/v1/scheduler");
+
+    let url : &str = &scheduler_path[..];
     let mut request = Request::new(Method::Post, url.parse().unwrap());
     let mime :Mime = "application/json".parse().unwrap();
 
-    println!("Sending request to: {}", url);
+    unsafe {
+
+        if ::VERBOSE_OUTPUT {
+            println!("Sending request to: {}", url)
+        }
+
+    }
+
     request.headers_mut().set(ContentType(mime));
 
     let subscribe_request = types::SubscribeRequest {
@@ -367,12 +461,17 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
 
     let body_content = serde_json::to_string(&subscribe_request).unwrap();
 
-    println!("Subscribe content:\n\n{}", body_content);
+    unsafe {
+
+        if ::VERBOSE_OUTPUT {
+            println!("Subscribe content:\n\n{}", body_content);
+        }
+
+    }
 
     request.set_body(Body::from(body_content));
 
     let work = client.request(request).and_then(|res: Response| {
-        println!("Response: {}", res.status());
         let mut stream_id: String;
 
         match res.status() {
@@ -382,7 +481,15 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
 
                 match header_value {
                     Some(value) =>  {
-                        println!("Stream id {}", value);
+
+                        unsafe {
+
+                            if ::VERBOSE_OUTPUT {
+                                println!("Stream id {}", value);
+                            }
+
+                        }
+
                         stream_id = value;
                     },
                     None => {
