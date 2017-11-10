@@ -1,6 +1,5 @@
 use serde_json::{Value};
 use std::collections::HashMap;
-use rand::{thread_rng, Rng};
 
 pub struct RequestedTaskInfo {
     pub image_name: String,
@@ -127,6 +126,9 @@ pub struct TaskInfo {
 pub struct Offer {
     pub offer_id: String,
     pub agent_id: String,
+    pub hostname: String,
+    pub port: i32,
+    pub scheme: String,
     pub cpus: f32,
     pub gpus: i32,
     pub mem: f32,
@@ -185,6 +187,9 @@ impl Offer {
          Offer {
              offer_id: String::from(value["id"]["value"].as_str().unwrap()),
              agent_id: String::from(value["agent_id"]["value"].as_str().unwrap()),
+             hostname: String::from(value["url"]["address"]["hostname"].as_str().unwrap()),
+             port: value["url"]["address"]["port"].as_i64().unwrap() as i32,
+             scheme: String::from(value["url"]["scheme"].as_str().unwrap()),
              cpus,
              gpus,
              mem,

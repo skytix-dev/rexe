@@ -30,8 +30,8 @@ header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 enum SchedulerState {
     Started,
     Subscribed,
-    Scheduled { agent_id: String, task_id: String },
-    Running { agent_id: String, task_id: String, sandbox_path: String },
+    Scheduled,
+    Running,
 }
 
 pub struct Scheduler<'a, 'b: 'a> {
@@ -40,6 +40,12 @@ pub struct Scheduler<'a, 'b: 'a> {
     task_info: &'b types::RequestedTaskInfo,
     framework_id: String,
     stream_id: String,
+    agent_id: Option<String>,
+    agent_scheme: Option<String>,
+    agent_hostname: Option<String>,
+    agent_port: Option<i32>,
+    task_id: Option<String>,
+    sandbox_path: Option<String>
 }
 
 impl<'a, 'b: 'a> Scheduler<'a, 'b> {
@@ -51,7 +57,13 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             scheduler_url,
             task_info,
             framework_id: String::from(""),
-            stream_id
+            stream_id,
+            agent_id: None,
+            agent_scheme: None,
+            agent_hostname: None,
+            agent_port: None,
+            task_id: None,
+            sandbox_path: None,
         };
 
         new_scheduler
@@ -60,8 +72,8 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
     fn is_scheduled(&self) -> bool {
 
         match self.state {
-            SchedulerState::Scheduled { ref agent_id, ref task_id } => true,
-            SchedulerState::Running { ref agent_id, ref task_id, ref sandbox_path } => true,
+            SchedulerState::Scheduled => true,
+            SchedulerState::Running => true,
             _ => false
         }
         
@@ -144,26 +156,15 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                         "TASK_RUNNING" => {
                             // We need to get the uuid from the message to send an acknowledgement of it.
                             let mut set_running: bool = false;
-                            let mut this_agent_id: String;
-                            let mut this_task_id: String;
 
                             match self.state {
 
-                                SchedulerState::Scheduled {ref agent_id, ref task_id} => {
+                                SchedulerState::Scheduled => {
                                     // Acknowledge the message and change our status
-                                    this_agent_id = String::from(agent_id.as_str());
-                                    this_task_id = String::from(task_id.as_str());
                                     set_running = true;
                                 },
-                                SchedulerState::Running {ref agent_id, ref task_id, ref sandbox_path } => {
-                                    // Just acknowledge So we dont get spammed.
-                                    this_agent_id = String::from(agent_id.as_str());
-                                    this_task_id = String::from(task_id.as_str());
-                                },
                                 _ => {
-                                    // Not sure what to do here yet.
-                                    this_agent_id = String::from("");
-                                    this_task_id = String::from("");
+
                                 }
 
                             }
@@ -172,7 +173,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
                                 Some(uuid) => {
                                     // Send acknowledgement.
-                                    self.acknowledge(self.framework_id.as_str(), this_agent_id.as_str(), this_task_id.as_str(), uuid);
+                                    self.acknowledge(uuid);
                                 },
                                 None => {
                                     // Do nothing.
@@ -187,8 +188,8 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
                             if set_running {
                                 // We need to get the executor ID
-                                let this_sandbox_path = String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap());
-                                self.set_running(this_agent_id.as_str(), this_task_id.as_str(), this_sandbox_path.as_str());
+                                self.sandbox_path = Some(String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap()));
+                                self.state = SchedulerState::Running;
                             }
 
                         }
@@ -197,12 +198,8 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
                             match self.state {
 
-                                SchedulerState::Running {ref agent_id, ref task_id, ref sandbox_path} => {
-                                    let mut this_sandbox_path: String = String::from(sandbox_path.as_str());
-
-                                    this_sandbox_path.push_str("/stdout");
-
-                                    self.output_stdout(this_sandbox_path.as_str());
+                                SchedulerState::Running => {
+                                    self.output_stdout();
                                 },
                                 _ => {
                                     println!("Unable to output STDOUT due to inconsistent state.  TASK_FINISHED received before app was marked as running.");
@@ -226,19 +223,26 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
     }
 
-    fn output_stdout(&self, sandbox_path: &str) {
+    fn output_stdout(&mut self) {
         let mut core = Core::new().unwrap();
         let client: Client<HttpConnector> = Client::new(&core.handle());
+        let mut agent_url: String = self.agent_scheme.take().unwrap();
 
-        let mime: Mime = "application/json".parse().unwrap();
+        agent_url.push_str("://");
+        agent_url.push_str(&self.agent_hostname.take().unwrap());
+        agent_url.push_str(":");
+        agent_url.push_str(&self.agent_port.take().unwrap().to_string());
 
-        let mut scheduler_url: String = String::from(self.scheduler_url);
-        scheduler_url.push_str("/files/download?path=");
-        scheduler_url.push_str(str::replace(sandbox_path, "/", "%2F").as_str());
+        let sandbox_path = self.sandbox_path.take().unwrap();
+        let sandbox_clone = sandbox_path.clone();
 
-        println!("URL: {}", scheduler_url);
+        agent_url.push_str("/files/download?path=");
+        agent_url.push_str(str::replace(sandbox_clone.as_str(), "/", "%2F").as_str());
+        agent_url.push_str("/stdout");
 
-        let mut request = Request::new(Method::Get, scheduler_url.parse().unwrap());
+        self.sandbox_path = Some(sandbox_path);
+
+        let mut request = Request::new(Method::Get, agent_url.parse().unwrap());
 
         let work = client.request(request).and_then(|response: Response| {
 
@@ -286,8 +290,11 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         exit(exit_code);
     }
 
-    fn acknowledge(&self, framework_id: &str, agent_id: &str, task_id: &str, uuid: &str) {
-        let request = types::acknowledge_request(framework_id, agent_id, task_id, uuid);
+    fn acknowledge(&mut self, uuid: &str) {
+        let agent_id = self.agent_id.take().unwrap();
+        let task_id = self.task_id.take().unwrap();
+
+        let request = types::acknowledge_request(&self.framework_id, &agent_id, &task_id, uuid);
 
         let body_content = serde_json::to_string(&request).unwrap();
 
@@ -295,10 +302,6 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             println!("Problem with sending acknowledge message to the server.");
         }
 
-    }
-
-    fn set_running(&mut self, agent_id: &str, task_id: &str, executor_id: &str) {
-        self.state = SchedulerState::Running { agent_id: String::from(agent_id), task_id: String::from(task_id), sandbox_path: String::from(executor_id)};
     }
 
     fn accept_offer(&mut self, offer: &types::Offer) {
@@ -317,7 +320,14 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         let output = body_content.clone();
 
         if self.deliver_request(Body::from(body_content)) {
-            self.state = SchedulerState::Scheduled{task_id: String::from(task_id), agent_id: String::from(&*offer.agent_id)};
+            self.state = SchedulerState::Scheduled;
+            self.task_id = Some(task_id.clone());
+            self.agent_id = Some(offer.agent_id.clone());
+            self.agent_scheme = Some(offer.scheme.clone());
+            self.agent_hostname = Some(offer.hostname.clone());
+            self.agent_port = Some(offer.port.clone());
+
+            //TODO: Set more props here
 
         } else {
             error!("Error sending acceptance offer to mesos\n\n{}", output);
