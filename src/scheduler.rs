@@ -250,8 +250,25 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                 StatusCode::Ok => {
                     response.body().concat2()
                         .and_then(move |body| {
-                            let stringify = from_utf8(&body).unwrap();
-                            println!("{}", stringify);
+                            let mut stringify = String::from(from_utf8(&body).unwrap());
+
+                            let mut expr = String::from(r"Starting task ");
+                            let this_task_id = self.task_id.take().unwrap();
+
+                            expr.push_str(this_task_id.as_str());
+
+                            match stringify.rfind(&expr) {
+
+                                Some(idx) => {
+                                    let parts = stringify.split_at(idx + expr.chars().count());
+                                    println!("{}", parts.1);
+                                },
+                                None => {
+                                    println!("{}", stringify);
+                                }
+
+                            }
+
                             futures::future::ok(())
                         }
                         ).wait();
@@ -302,6 +319,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             println!("Problem with sending acknowledge message to the server.");
         }
 
+        self.task_id = Some(task_id);
     }
 
     fn accept_offer(&mut self, offer: &types::Offer) {
