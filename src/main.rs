@@ -18,6 +18,8 @@ mod types;
 
 use clap::{Arg, App, ArgMatches};
 use types::RequestedTaskInfo;
+use std::collections::HashMap;
+use regex::Regex;
 
 pub static mut VERBOSE_OUTPUT: bool = false;
 
@@ -110,6 +112,27 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         args = String::from("");
     }
 
+    let mut env_options: HashMap<String, String> = HashMap::new();
+
+    if matches.is_present("env") {
+        let args_param = matches.values_of("env");
+        let args_list: Vec<_> = args_param.unwrap().collect();
+        let regex = Regex::new(r"^(.+?)=(.+?)$").unwrap();
+
+        for arg in args_list {
+
+            if regex.is_match(arg) {
+                let groups = regex.captures(arg).unwrap();
+
+                let key = String::from(groups.get(1).unwrap().as_str());
+                let value = String::from(groups.get(2).unwrap().as_str());
+
+                env_options.insert(key, value);
+            }
+        }
+
+    }
+
     RequestedTaskInfo {
         image_name,
         cpus,
@@ -117,6 +140,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         mem,
         disk,
         args,
+        env_args: env_options,
     }
     
 }
@@ -154,6 +178,12 @@ fn main() {
                 .required(false)
                 .help("Specify the amount memory required")
                 .takes_value(true))
+            .arg(Arg::with_name("env")
+                .short("e")
+                .required(false)
+                .multiple(true)
+                .help("Environment variables")
+                .takes_value(true))
             .arg(Arg::with_name("gpus")
                 .short("g")
                 .value_name("#GPUS")
@@ -166,13 +196,14 @@ fn main() {
                 .help("Verbose output")
                 .takes_value(false))
             .arg(Arg::with_name("IMAGE")
+                .short("i")
                 .help("Name of docker image")
                 .required(true)
-                .index(1)
+                .takes_value(true)
             )
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .index(2)
+                .index(1)
                 .required(false)
                 .multiple(true)
             )

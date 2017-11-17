@@ -7,7 +7,8 @@ pub struct RequestedTaskInfo {
     pub gpus: i32,
     pub mem: f32,
     pub disk: f32,
-    pub args: String
+    pub args: String,
+    pub env_args: HashMap<String, String>
 }
 
 #[derive(Serialize, Debug)]
@@ -66,7 +67,8 @@ pub struct Parameter {
 pub struct CommandInfo {
     value: String,
     arguments: Vec<String>,
-    shell: bool
+    shell: bool,
+    environment: Option<Environment>
 }
 
 #[derive(Serialize)]
@@ -110,6 +112,17 @@ pub enum ExecutorInfoType {
     UNKNOWN,
     DEFAULT,
     CUSTOM
+}
+
+#[derive(Serialize)]
+pub struct Variable {
+    name: String,
+    value: String
+}
+
+#[derive(Serialize)]
+pub struct Environment {
+    variables: Vec<Variable>
 }
 
 #[derive(Serialize)]
@@ -405,6 +418,29 @@ fn get_arguments(input: &str) -> Vec<String> {
 }
 
 pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agent_id: &'a str, task_id: &'a str, task_info: &'b RequestedTaskInfo) -> Call {
+    let env_args = task_info.env_args.clone();
+
+    let mut env_vars: Vec<Variable> = vec![];
+    let environment: Option<Environment>;
+
+    if task_info.env_args.len() > 0 {
+
+        for (key, value) in env_args {
+
+            env_vars.push(Variable {
+                name: key,
+                value: value
+            });
+
+        }
+
+        environment = Some(Environment {
+            variables: env_vars
+        });
+
+    } else {
+        environment = None;
+    }
 
     Call {
         message_type: CallType::ACCEPT,
@@ -440,6 +476,7 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                     value: get_argument_value(&*task_info.args),
                                     arguments: get_arguments(&*task_info.args),
                                     shell: false,
+                                    environment
                                 },
                                 resources: {
                                     build_resources(&task_info)
