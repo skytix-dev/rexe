@@ -1,0 +1,17 @@
+name: rexe
+version: '0.1'
+summary: Synchronous task executor for Mesos
+description: |
+  Execute tasks in a Mesos cluster synchronously with STDOUT piped back to the caller
+
+grade: stable
+confinement: strict # use 'strict' once you have the right plugs and slots
+
+parts:
+  rexe:
+    # See 'snapcraft plugins'
+    plugin: rust
+    source: .
+apps:
+  rexe:
+    command: rexe
