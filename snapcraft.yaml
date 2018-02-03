@@ -1,11 +1,11 @@
 name: rexe
-version: '0.1.1'
+version: '0.2'
 summary: Synchronous task executor for Mesos
 description: |
-  Execute tasks in a Mesos cluster synchronously with STDOUT piped back to the caller
+  Execute container tasks in a Mesos cluster synchronously with STDOUT piped back to the caller.
 
 grade: stable
-confinement: strict # use 'strict' once you have the right plugs and slots
+confinement: classic
 
 parts:
   rexe:
