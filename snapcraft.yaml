@@ -12,6 +12,8 @@ parts:
     # See 'snapcraft plugins'
     plugin: rust
     source: .
+    build-packages:
+      - libssl-dev
 apps:
   rexe:
     command: rexe
