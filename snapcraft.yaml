@@ -14,6 +14,7 @@ parts:
     source: .
     build-packages:
       - libssl-dev
+      - pkg-config
 apps:
   rexe:
     command: rexe
