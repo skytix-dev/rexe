@@ -8,7 +8,8 @@ pub struct RequestedTaskInfo {
     pub mem: f32,
     pub disk: f32,
     pub args: String,
-    pub env_args: HashMap<String, String>
+    pub env_args: HashMap<String, String>,
+    pub verbose_output: bool
 }
 
 #[derive(Serialize, Debug)]
@@ -18,30 +19,46 @@ pub struct Scalar {
 
 #[derive(Serialize, Debug)]
 pub enum ContainerInfoType {
-    DOCKER,
-    MESOS
+    #[serde(rename = "DOCKER")]
+    Docker,
+    #[serde(rename = "MESOS")]
+    Mesos
 }
 
 #[derive(Serialize, Debug)]
 pub enum DockerInfoNetwork {
-    HOST,
-    BRIDGE,
-    NONE,
-    USER
+    #[serde(rename = "HOST")]
+    Host,
+    #[serde(rename = "BRIDGE")]
+    Bridge,
+    #[serde(rename = "NONE")]
+    None,
+    #[serde(rename = "USER")]
+    User
 }
 
 #[derive(Serialize, Debug)]
 pub enum OperationType {
-    UNKNOWN,
-    LAUNCH,
-    LAUNCH_GROUP,
-    RESERVE,
-    UNRESERVE,
-    CREATE,
-    DESTROY,
-    CREATE_VOLUME,
-    CREATE_BLOCK,
-    DESTROY_BLOCK
+    #[serde(rename = "UNKNOWN")]
+    Unknwon,
+    #[serde(rename = "LAUNCH")]
+    Launch,
+    #[serde(rename = "LAUNCH_GROUP")]
+    LaunchGroup,
+    #[serde(rename = "RESERVE")]
+    Reserve,
+    #[serde(rename = "UNRESERVE")]
+    Unreserve,
+    #[serde(rename = "CREATE")]
+    Create,
+    #[serde(rename = "DESTROY")]
+    Destroy,
+    #[serde(rename = "CREATE_VOLUME")]
+    CreateVolume,
+    #[serde(rename = "CREATE_BLOCK")]
+    CreateBlock,
+    #[serde(rename = "DESTROY_BLOCK")]
+    DestroyBlock
 }
 
 #[derive(Serialize, Debug)]
@@ -109,9 +126,12 @@ pub struct Resource {
 
 #[derive(Serialize)]
 pub enum ExecutorInfoType {
-    UNKNOWN,
-    DEFAULT,
-    CUSTOM
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
+    #[serde(rename = "DEFAULT")]
+    Default,
+    #[serde(rename = "CUSTOM")]
+    Custom
 }
 
 #[derive(Serialize)]
@@ -240,17 +260,28 @@ pub struct SubscribeRequest {
 
 #[derive(Deserialize, Debug)]
 pub enum Type {
-    UNKNOWN,
-    SUBSCRIBED,
-    OFFERS,
-    INVERSE_OFFERS,
-    RESCIND,
-    RESCIND_INVERSE_OFFER,
-    UPDATE,
-    OFFER_OPERATION_UPDATE,
-    MESSAGE,
-    FAILURE,
-    ERROR,
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
+    #[serde(rename = "SUBSCRIBED")]
+    Subscribed,
+    #[serde(rename = "OFFERS")]
+    Offers,
+    #[serde(rename = "INVERSE_OFFERS")]
+    InverseOffers,
+    #[serde(rename = "RESCIND")]
+    Rescind,
+    #[serde(rename = "RESCIND_INVERSE_OFFER")]
+    RescindInverseOffer,
+    #[serde(rename = "UPDATE")]
+    Update,
+    #[serde(rename = "OFFER_OPERATION_UPDATE")]
+    OfferOperationUpdate,
+    #[serde(rename = "MESSAGE")]
+    Message,
+    #[serde(rename = "FAILURE")]
+    Failure,
+    #[serde(rename = "ERROR")]
+    Error,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -297,23 +328,40 @@ pub struct Operation {
 
 #[derive(Serialize, Debug)]
 pub enum CallType {
-    UNKNOWN,
-    SUBSCRIBE,
-    TEARDOWN,
-    ACCEPT,
-    DECLINE,
-    ACCEPT_INVERSE_OFFERS,
-    DECLINE_INVERSE_OFFERS,
-    REVIVE,
-    KILL,
-    SHUTDOWN,
-    ACKNOWLEDGE,
-    ACKNOWLEDGE_OFFER_OPERATION_UPDATE,
-    RECONCILE,
-    RECONCILE_OFFER_OPERATIONS,
-    MESSAGE,
-    REQUEST,
-    SUPPRESS
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
+    #[serde(rename = "SUBSCRIBE")]
+    Subscribe,
+    #[serde(rename = "TEARDOWN")]
+    Teardown,
+    #[serde(rename = "ACCEPT")]
+    Accept,
+    #[serde(rename = "DECLINE")]
+    Decline,
+    #[serde(rename = "ACCEPT_INVERSE_OFFERS")]
+    AcceptInverseOffers,
+    #[serde(rename = "DECLINE_INVERSE_OFFERS")]
+    DeclineInverseOffers,
+    #[serde(rename = "REVIVE")]
+    Revive,
+    #[serde(rename = "KILL")]
+    Kill,
+    #[serde(rename = "SHUTDOWN")]
+    Shutdown,
+    #[serde(rename = "ACKNOWLEDGE")]
+    Acknowledge,
+    #[serde(rename = "ACKNOWLEDGE_OFFER_OPERATION_UPDATE")]
+    AcknowledgeOfferOperationUpdate,
+    #[serde(rename = "RECONCILE")]
+    Reconcile,
+    #[serde(rename = "RECONCILE_OFFER_OPERATIONS")]
+    ReconcileOfferOperations,
+    #[serde(rename = "MESSAGE")]
+    Message,
+    #[serde(rename = "REQUEST")]
+    Request,
+    #[serde(rename = "SUPPRESS")]
+    Suppress
 }
 
 #[derive(Serialize)]
@@ -443,7 +491,7 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
     }
 
     Call {
-        message_type: CallType::ACCEPT,
+        message_type: CallType::Accept,
         framework_id: FrameworkID { value: String::from(framework_id) },
         accept: Accept {
             offer_ids: vec![ValueContainer {
@@ -451,7 +499,7 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
             }],
             operations: vec![
                 Operation {
-                    operation_type: OperationType::LAUNCH,
+                    operation_type: OperationType::Launch,
                     launch: Launch {
                         task_infos: vec![
                             TaskInfo {
@@ -460,13 +508,13 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                 agent_id: ValueContainer { value: String::from(agent_id) },
                                 container: {
                                     ContainerInfo {
-                                        container_type: ContainerInfoType::DOCKER,
+                                        container_type: ContainerInfoType::Docker,
                                         volumes: vec![],
                                         docker: DockerInfo {
                                             image: String::from(&*task_info.image_name),
                                             force_pull_image: true,
                                             privileged: false,
-                                            network: DockerInfoNetwork::BRIDGE,
+                                            network: DockerInfoNetwork::Bridge,
                                             parameters: vec![],
                                             port_mappings: vec![]
                                         }
@@ -496,7 +544,7 @@ pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str) -> Call {
     // Sending an accept message with no operations is the same as a decline.  Means less code.
 
     Call {
-        message_type: CallType::ACCEPT,
+        message_type: CallType::Accept,
         framework_id: FrameworkID { value: String::from(framework_id) },
         accept: Accept {
             offer_ids: vec![ValueContainer {
@@ -511,7 +559,7 @@ pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str) -> Call {
 pub fn teardown_request<'a>(framework_id: &'a str) -> TeardownCall {
 
     TeardownCall {
-        message_type: CallType::TEARDOWN,
+        message_type: CallType::Teardown,
         framework_id: FrameworkID { value: String::from(framework_id) },
     }
 }
@@ -519,7 +567,7 @@ pub fn teardown_request<'a>(framework_id: &'a str) -> TeardownCall {
 pub fn acknowledge_request(framework_id: &str, agent_id: &str, task_id: &str, uuid: &str) -> AcknowledgeCall {
 
     AcknowledgeCall {
-        message_type: CallType::ACKNOWLEDGE,
+        message_type: CallType::Acknowledge,
         framework_id: FrameworkID { value: String::from(framework_id) },
         acknowledge: Acknowledge {
             agent_id: ValueContainer { value: String::from(agent_id) },

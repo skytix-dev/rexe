@@ -1,17 +1,19 @@
 extern crate clap;
 extern crate env_logger;
-extern crate futures;
-extern crate tokio_core;
 extern crate regex;
 extern crate serde;
 extern crate serde_json;
 extern crate ctrlc;
 extern crate rand;
 extern crate base64;
+extern crate reqwest;
 
-#[macro_use] extern crate log;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate hyper;
+#[macro_use]
+extern crate log;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate hyper;
 
 mod scheduler;
 mod types;
@@ -21,9 +23,7 @@ use types::RequestedTaskInfo;
 use std::collections::HashMap;
 use regex::Regex;
 
-pub static mut VERBOSE_OUTPUT: bool = false;
-
-fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
+fn generate_task_info<'a>(ref matches: &'a ArgMatches, verbose_output: bool) -> RequestedTaskInfo {
     let cpus_param = matches.value_of("cpus").unwrap().parse::<f32>();
     let cpus: f32;
 
@@ -36,7 +36,6 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
             error!("Number of CPUs required must be greater than 0");
             std::process::exit(1);
         }
-
     } else {
         error!("Number of CPUs specified is not a valid number");
         std::process::exit(1);
@@ -52,7 +51,6 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
             error!("Memory specified must be greater than 0");
             std::process::exit(1);
         }
-
     } else {
         error!("Number of CPUs specified is not a valid number");
         std::process::exit(1);
@@ -60,9 +58,9 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
 
     let disk: f32 = match matches.value_of("disk") {
-        Some(value) => match value.parse::<f32>(){
+        Some(value) => match value.parse::<f32>() {
             Ok(parsed_value) => parsed_value,
-            Err(e) => {
+            Err(_) => {
                 error!("Disk size specified is not a valid number");
                 std::process::exit(1);
             }
@@ -83,12 +81,10 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
                 error!("Number of GPUs required must be greater than 0");
                 std::process::exit(1);
             }
-
         } else {
             error!("Number of GPUs specified is not a valid number");
             std::process::exit(1);
         }
-
     } else {
         gpus = 0;
     }
@@ -107,7 +103,6 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         }
 
         args = concat_list;
-
     } else {
         args = String::from("");
     }
@@ -120,7 +115,6 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         let regex = Regex::new(r"^(.+?)=(.+?)$").unwrap();
 
         for arg in args_list {
-
             if regex.is_match(arg) {
                 let groups = regex.captures(arg).unwrap();
 
@@ -130,7 +124,6 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
                 env_options.insert(key, value);
             }
         }
-
     }
 
     RequestedTaskInfo {
@@ -141,15 +134,14 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         disk,
         args,
         env_args: env_options,
+        verbose_output,
     }
-    
 }
 
 fn main() {
     let logger = env_logger::init();
 
     if logger.is_ok() {
-
         let matches = App::new("Remote Executor")
             .version("1.0")
             .author("Marc D. <xfiremd@live.com>")
@@ -193,8 +185,9 @@ fn main() {
             .arg(Arg::with_name("verbose")
                 .short("v")
                 .required(false)
+                .multiple(true)
                 .help("Verbose output")
-                .takes_value(false))
+            )
             .arg(Arg::with_name("IMAGE")
                 .short("i")
                 .help("Name of docker image")
@@ -210,29 +203,14 @@ fn main() {
             .get_matches();
 
         let mesos_master = matches.value_of("mesos").unwrap();
-        let task_info = generate_task_info(&matches);
+        let verbose_output: bool = matches.occurrences_of("verbose") > 0;
+        let task_info = generate_task_info(&matches, verbose_output);
 
-        unsafe {
-
-            match matches.value_of("verbose") {
-
-                Some(value) => {
-                    VERBOSE_OUTPUT = true;
-                },
-                _ => {
-                    VERBOSE_OUTPUT = false;
-                }
-
-            }
-
-            if VERBOSE_OUTPUT {
-                println!("Executing task {}", mesos_master);
-            }
-
+        if verbose_output {
+            println!("Executing task {}", mesos_master);
         }
 
         scheduler::execute(&mesos_master, &task_info);
-
 
     } else {
         error!("Unable to initialise logger");

@@ -1,29 +1,14 @@
 use std::str::from_utf8;
 use std::process::exit;
 
-use futures;
-use futures::Future;
-use futures::stream::Stream;
-
-use hyper::Client;
-use hyper::Request;
-use hyper::Body;
-use hyper::Response;
-use hyper::Method;
-use hyper::Chunk;
-use hyper::StatusCode;
-use hyper::client::HttpConnector;
 use hyper::header::{Headers, ContentType};
-use hyper::mime::Mime;
-use hyper::Uri;
-use tokio_core::reactor::Core;
+use reqwest;
 use serde_json;
 use serde_json::{Value};
 use types;
-use regex::Regex;
-use ctrlc;
 use rand::{thread_rng, Rng};
 use base64::{decode};
+use std::io::Read;
 
 header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 
@@ -52,7 +37,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
     fn new(scheduler_url: &'a str, task_info: &'b types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a, 'b> {
 
-        let mut new_scheduler = Scheduler {
+        let new_scheduler = Scheduler {
             state: SchedulerState::Started,
             scheduler_url,
             task_info,
@@ -89,17 +74,15 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         let message_type = value["type"].as_str().unwrap();
 
         match message_type {
+
             "SUBSCRIBED" => {
                 let framework_id = value["subscribed"]["framework_id"]["value"].as_str().unwrap();
                 self.set_subscribed(String::from(framework_id));
 
-                unsafe {
-
-                    if ::VERBOSE_OUTPUT {
-                        println!("Subscribed to Mesos with framework_id: {}", self.framework_id);
-                    }
-
+                if self.task_info.verbose_output {
+                    println!("Subscribed to Mesos with framework_id: {}", self.framework_id);
                 }
+
             },
             "OFFERS" => {
 
@@ -107,7 +90,6 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                     Some(offers) => {
 
                         for offer_value in offers {
-                            let offer_id = offer_value["id"]["value"].as_str().unwrap();
                             let offer = types::Offer::from(offer_value);
 
                             if !self.is_scheduled() {
@@ -190,6 +172,11 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                                 // We need to get the executor ID
                                 self.sandbox_path = Some(String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap()));
                                 self.state = SchedulerState::Running;
+
+                                if self.task_info.verbose_output {
+                                    println!("Task is now running")
+                                }
+
                             }
 
                         }
@@ -199,7 +186,12 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                             match self.state {
 
                                 SchedulerState::Running => {
-                                    self.output_stdout();
+
+                                    if self.task_info.verbose_output {
+                                        println!("Task has finished")
+                                    }
+
+                                    self.fetch_stdout();
                                 },
                                 _ => {
                                     println!("Unable to output STDOUT due to inconsistent state.  TASK_FINISHED received before app was marked as running.");
@@ -223,84 +215,48 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
     }
 
-    fn output_stdout(&mut self) {
-        let mut core = Core::new().unwrap();
-        let client: Client<HttpConnector> = Client::new(&core.handle());
-        let mut agent_url: String = self.agent_scheme.take().unwrap();
+    fn fetch_stdout(&mut self) {
+
+        let mut agent_url: String = match self.agent_scheme {
+            Some(ref url) => String::from(url.as_str()),
+            None => String::from("")
+        };
 
         agent_url.push_str("://");
-        agent_url.push_str(&self.agent_hostname.take().unwrap());
+        agent_url.push_str(self.agent_hostname.as_ref().unwrap().as_str());
         agent_url.push_str(":");
-        agent_url.push_str(&self.agent_port.take().unwrap().to_string());
-
-        let sandbox_path = self.sandbox_path.take().unwrap();
-        let sandbox_clone = sandbox_path.clone();
-
+        agent_url.push_str(&self.agent_port.unwrap().to_string());
         agent_url.push_str("/files/download?path=");
-        agent_url.push_str(str::replace(sandbox_clone.as_str(), "/", "%2F").as_str());
+
+        match self.sandbox_path {
+
+            Some(ref path) => {
+                agent_url.push_str(str::replace(path.as_str(), "/", "%2F").as_str());
+            },
+            _ => {}
+
+        };
+
         agent_url.push_str("/stdout");
 
-        self.sandbox_path = Some(sandbox_path);
+        match reqwest::get(agent_url.as_str()) {
 
-        let mut request = Request::new(Method::Get, agent_url.parse().unwrap());
+            Ok(ref mut response) => {
+                println!("{}", response.text().unwrap());
+            },
+            Err(error) => {
+                error!("Failed to read STDOUT from agent: {}", error);
+            }
 
-        let work = client.request(request).and_then(|response: Response| {
+        }
 
-            match response.status() {
-                StatusCode::Ok => {
-                    response.body().concat2()
-                        .and_then(move |body| {
-                            let mut stringify = String::from(from_utf8(&body).unwrap());
-
-                            let mut expr = String::from(r"Starting task ");
-                            let this_task_id = self.task_id.take().unwrap();
-
-                            expr.push_str(this_task_id.as_str());
-
-                            match stringify.rfind(&expr) {
-
-                                Some(idx) => {
-                                    let parts = stringify.split_at(idx + expr.chars().count());
-                                    println!("{}", parts.1);
-                                },
-                                None => {
-                                    println!("{}", stringify);
-                                }
-
-                            }
-
-                            futures::future::ok(())
-                        }
-                        ).wait();
-                },
-
-                _ => {
-                    let status_code = &response.status().as_u16();
-
-                    response.body().concat2()
-                        .and_then(move |body| {
-
-
-                            let stringify = from_utf8(&body).unwrap();
-                            error!("Error:\n\n {}\n{}", status_code, stringify);
-                            futures::future::ok(())
-                        }
-                        ).wait();
-
-                },
-            };
-
-            Ok(())
-        });
-
-        core.run(work);
     }
 
     fn deregister_exit(&self, exit_code: i32) {
         let request = types::teardown_request(&self.framework_id);
         let body_content = serde_json::to_string(&request).unwrap();
 
-        if !self.deliver_request(Body::from(body_content)) {
+        if !self.deliver_request(body_content) {
             println!("Unable to send teardown call to master. Exitting anyway.");
         }
 
@@ -308,22 +264,20 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
     }
 
     fn acknowledge(&mut self, uuid: &str) {
-        let agent_id = self.agent_id.take().unwrap();
-        let task_id = self.task_id.take().unwrap();
+        let agent_id = self.agent_id.as_ref().unwrap();
+        let task_id = self.task_id.as_ref().unwrap();
 
-        let request = types::acknowledge_request(&self.framework_id, &agent_id, &task_id, uuid);
+        let request = types::acknowledge_request(&self.framework_id, agent_id, task_id, uuid);
 
         let body_content = serde_json::to_string(&request).unwrap();
 
-        if !self.deliver_request(Body::from(body_content)) {
+        if !self.deliver_request(body_content) {
             println!("Problem with sending acknowledge message to the server.");
         }
 
-        self.task_id = Some(task_id);
     }
 
     fn accept_offer(&mut self, offer: &types::Offer) {
-        let id = &offer.offer_id;
         let task_id: String = thread_rng().gen_ascii_chars().take(10).collect();
         
         let request = types::accept_request(
@@ -337,7 +291,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         let body_content = serde_json::to_string(&request).unwrap();
         let output = body_content.clone();
 
-        if self.deliver_request(Body::from(body_content)) {
+        if self.deliver_request(body_content) {
             self.state = SchedulerState::Scheduled;
             self.task_id = Some(task_id.clone());
             self.agent_id = Some(offer.agent_id.clone());
@@ -355,7 +309,6 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
     }
 
     fn decline_offer(&mut self, offer: &types::Offer) {
-        let id = &offer.offer_id;
 
         let request = types::decline_request(
             &self.framework_id,
@@ -364,7 +317,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
         let body_content = serde_json::to_string(&request).unwrap();
 
-        if !self.deliver_request(Body::from(body_content)) {
+        if !self.deliver_request(body_content) {
             println!("Error sending decline to master");
         }
 
@@ -379,49 +332,31 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             offer.mem >= self.task_info.mem
     }
 
-    fn deliver_request(&self, body: Body) -> bool {
-        let mut core = Core::new().unwrap();
-        let client: Client<HttpConnector> = Client::new(&core.handle());
-
-        let mime: Mime = "application/json".parse().unwrap();
-
+    fn deliver_request(&self, body: String) -> bool {
         let mut scheduler_url: String = String::from(self.scheduler_url);
         scheduler_url.push_str("/api/v1/scheduler");
 
-        let mut request = Request::new(Method::Post, scheduler_url.parse().unwrap());
+        let mut headers = Headers::new();
 
-        request.headers_mut().set(ContentType(mime));
-        request.headers_mut().set(MesosStreamId(String::from(&*self.stream_id)));
-        request.set_body(body);
+        headers.set(ContentType::json());
+        headers.set(MesosStreamId(String::from(&*self.stream_id)));
 
-        let work = client.request(request).and_then(|response: Response| {
-            let mut success: bool = false;
+        let client: reqwest::Client = reqwest::ClientBuilder::new()
+            .default_headers(headers)
+            .build().unwrap();
 
-            match response.status() {
-                StatusCode::Accepted => success = true,
-                _ => {
-                    let status_code = &response.status().as_u16();
+        match client.post(scheduler_url.as_str())
+            .body(body)
+            .send() {
 
-                    response.body().concat2()
-                        .and_then(move |body| {
-                            let stringify = from_utf8(&body).unwrap();
-                            println!("Error:\n\n {}", stringify);
-                            futures::future::ok(())
-                        }
-                    ).wait();
+            Ok(_) => true,
+            Err(error) => {
+                error!("{}", error);
+                false
+            }
 
-                    success = false
-                },
-            };
-
-            Ok(success)
-        });
-
-        match core.run(work) {
-            Ok(value) => value,
-            Err(_) => false,
         }
-        
+
     }
 
 }
@@ -439,7 +374,7 @@ fn get_header_string_value<'a>(name: &'a str, headers: &'a Headers) -> Option<St
 
                 match String::from_utf8(Vec::from(data)) {
                     Ok(field_value) => value.push_str(&field_value[..]),
-                    Err(e) => error!("Error while reading header value")
+                    Err(_) => error!("Error while reading header value")
                 }
 
             }
@@ -451,11 +386,71 @@ fn get_header_string_value<'a>(name: &'a str, headers: &'a Headers) -> Option<St
     Some(value)
 }
 
+fn read_next_message(response: &mut reqwest::Response) -> String {
+    let mut msg_length_str = String::from("");
+    let mut buffer: String = String::from("");
+    let mut have_msg_length = false;
+
+    while !have_msg_length {
+        let mut buf: Vec<u8> = vec![0; 1];
+
+        match response.read(&mut buf[..]) {
+
+            Ok(_) => {
+                let resp_str = from_utf8(&buf).unwrap();
+
+                for c in resp_str.chars() {
+
+                    if !have_msg_length {
+                        // We need to start reading looking for a newline character.  This string will then be the number of bytes we need to read for the next message.
+                        if c == '\n' {
+                            have_msg_length = true;
+
+                        } else {
+                            msg_length_str.push_str(c.to_string().as_str());
+                        }
+
+                    } else {
+                        // We may have found the end-of-line and these characters are part of the message body.
+                        buffer.push_str(c.to_string().as_str());
+                    }
+
+                }
+
+            },
+            Err(e) => {
+                error!("{}", e);
+                exit(1);
+            }
+
+        };
+
+    }
+
+    let msg_len = msg_length_str.parse::<usize>().unwrap() - buffer.len();
+    let mut buf: Vec<u8> = vec![0; msg_len];
+
+    match response.read_exact(&mut buf[..]) {
+
+        Ok(_) => {
+
+            match from_utf8(&buf) {
+                Ok(value) => buffer.push_str(value),
+                Err(_) => {}
+            }
+
+        },
+        Err(e) => {
+            error!("{}", e);
+            exit(1);
+        }
+    }
+
+    buffer
+}
+
 pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
     let mut scheduler_uri :String = String::from("http://");
-    let mut core = Core::new().unwrap();
-
-    let client: Client<HttpConnector> = Client::new(&core.handle());
 
     scheduler_uri.push_str(mesos_host);
 
@@ -463,18 +458,10 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
     scheduler_path.push_str("/api/v1/scheduler");
 
     let url : &str = &scheduler_path[..];
-    let mut request = Request::new(Method::Post, url.parse().unwrap());
-    let mime :Mime = "application/json".parse().unwrap();
 
-    unsafe {
-
-        if ::VERBOSE_OUTPUT {
-            println!("Sending request to: {}", url)
-        }
-
+    if task_info.verbose_output {
+        println!("Sending request to: {}", url)
     }
-
-    request.headers_mut().set(ContentType(mime));
 
     let subscribe_request = types::SubscribeRequest {
         message_type: String::from("SUBSCRIBE"),
@@ -489,90 +476,49 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
 
     let body_content = serde_json::to_string(&subscribe_request).unwrap();
 
-    unsafe {
-
-        if ::VERBOSE_OUTPUT {
-            println!("Subscribe content:\n\n{}", body_content);
-        }
-
+    if task_info.verbose_output {
+        println!("Subscribe message: {}", body_content);
     }
 
-    request.set_body(Body::from(body_content));
+    let mut headers = Headers::new();
 
-    let work = client.request(request).and_then(|res: Response| {
-        let mut stream_id: String;
+    headers.set(ContentType::json());
 
-        match res.status() {
+    let client: reqwest::Client = reqwest::ClientBuilder::new()
+        .default_headers(headers)
+        .build().unwrap();
 
-            StatusCode::Ok => {
-                let header_value = get_header_string_value("Mesos-Stream-Id", res.headers());
+    match client.post(url)
+        .body(body_content)
+        .send() {
 
-                match header_value {
-                    Some(value) =>  {
+        Ok(mut response) => {
 
-                        unsafe {
+            match get_header_string_value("Mesos-Stream-Id", response.headers()) {
 
-                            if ::VERBOSE_OUTPUT {
-                                println!("Stream id {}", value);
-                            }
+                Some(id) => {
 
-                        }
+                    if task_info.verbose_output {
+                        println!("Stream id {}", id);
+                    }
 
-                        stream_id = value;
-                    },
-                    None => {
-                        error!("Unable to read Mesos-Stream-Id from subscribe response");
-                        exit(1);
-                    },
-                };
-            },
-            _ => {
-                error!("Unable to subscribe as a scheduler to Mesos");
-                exit(1);
-            }
-        };
+                    let mut scheduler = Scheduler::new(&scheduler_uri, task_info, id);
 
-        let mut buffer: String = String::from("");
-        let mut message_length: usize = 0;
+                    loop {
+                        let message = read_next_message(&mut response);
+                        scheduler.handle_message(message);
+                    }
 
-        let regex: Regex = Regex::new(r"^((\d+)\n).*$").unwrap();
-
-        let mut scheduler = Scheduler::new(&scheduler_uri, task_info, stream_id);
-
-        res.body().for_each(move |chunk: Chunk| {
-
-            match from_utf8(chunk.as_ref()) {
-                Ok(value) => buffer.push_str(value),
-                Err(_) => {}
-            }
-
-            // If we have a message length set, then we know we are waiting for more bytes to come in.
-            if message_length == 0 {
-                let local_buffer = buffer.clone();
-                let local_buffer_str = local_buffer.as_str();
-
-                if regex.is_match(local_buffer_str) {
-                    let groups = regex.captures(local_buffer_str).unwrap();
-
-                    message_length = groups.get(2).unwrap().as_str().parse::<usize>().unwrap();
-                    let capture = groups.get(1).unwrap().as_str();
-
-                    buffer.drain(..capture.len());
+                },
+                None => {
+                    error!("Unable to get stream id from Mesos");
                 }
-                
-            }
 
-            if message_length > 0 && buffer.len() >= message_length {
-                let message: String = buffer.drain(..message_length).collect();
-                message_length = 0;
+            };
 
-                scheduler.handle_message(message);
-            }
+        },
+        Err(_) => {}
 
-            futures::future::ok::<_,_>(())
-        })
+    };
 
-    });
-
-    core.run(work).unwrap();
 }
