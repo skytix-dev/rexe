@@ -5,7 +5,7 @@ description: |
   Execute container tasks in a Mesos cluster synchronously with STDOUT piped back to the caller.
 
 grade: stable
-confinement: classic
+confinement: strict
 
 parts:
   rexe:
