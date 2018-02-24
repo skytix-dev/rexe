@@ -129,6 +129,8 @@ impl<'a, 'b: 'a> Scheduler<'a> {
                         "TASK_ERROR" |
                         "TASK_FAILED" |
                         "TASK_KILLED" |
+                        "TASK_KILLING" |
+                        "TASK_DROPPED" |
                         "REASON_EXECUTOR_TERMINATED" |
                         "REASON_CONTAINER_LAUNCH_FAILED" => {
 
@@ -182,7 +184,7 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
                             }
 
-                        }
+                        },
                         "TASK_FINISHED" => {
                             // Finished.  Return no error.  We need to get stdout for it.
 
