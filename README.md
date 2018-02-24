@@ -12,8 +12,8 @@ Once checked out, simple build the project using Cargo as below:
 
 ## Usage
 
-rexe -m <mesos_url> -i <docker image> -c <#cpus) -M <#memory> -d <#disk> -e <ENV_NAME>:<ENV_VALUE> <ARGS>
+rexe <MESOS_URL> <OPTIONS> <COMMAND_ARGS>
 
 Example:
 
-`rexe -m "localhost:5050" -i busybox -c 1 -m 128 echo 'Hello World!'`
+`rexe 10.9.10.1:5050 -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value -i ubuntu:latest --force-pull "ls -la /"`

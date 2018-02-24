@@ -1,5 +1,11 @@
 use serde_json::{Value};
 use std::collections::HashMap;
+use terminal_size::{Width, Height, terminal_size};
+
+pub enum TTYMode {
+    Interactive,
+    Headless
+}
 
 pub struct RequestedTaskInfo {
     pub image_name: String,
@@ -9,7 +15,10 @@ pub struct RequestedTaskInfo {
     pub disk: f32,
     pub args: String,
     pub env_args: HashMap<String, String>,
-    pub verbose_output: bool
+    pub verbose_output: bool,
+    pub tty_mode: TTYMode,
+    pub attrs: HashMap<String, String>,
+    pub force_pull: bool
 }
 
 #[derive(Serialize, Debug)]
@@ -108,12 +117,24 @@ pub struct DockerInfo {
 }
 
 #[derive(Serialize)]
+pub struct WindowSize {
+    rows: u16,
+    columns: u16
+}
+
+#[derive(Serialize)]
+pub struct TTYInfo {
+    window_size: WindowSize
+}
+
+#[derive(Serialize)]
 pub struct ContainerInfo {
     #[serde(rename = "type")]
     container_type: ContainerInfoType,
     docker: DockerInfo,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    volumes: Vec<Volume>
+    volumes: Vec<Volume>,
+    tty_info: Option<TTYInfo>
 }
 
 #[derive(Serialize, Debug)]
@@ -166,6 +187,7 @@ pub struct Offer {
     pub gpus: i32,
     pub mem: f32,
     pub disk: f32,
+    pub attributes: HashMap<String, String>
 }
 
 impl Offer {
@@ -217,6 +239,44 @@ impl Offer {
              }
          };
 
+         let mut attributes: HashMap<String, String> = HashMap::new();
+
+         match value["attributes"].as_array() {
+
+             Some(attrs) => {
+
+                 for attr in attrs {
+
+                     match attr["name"].as_str() {
+
+                         Some(name) => {
+
+                             attributes.insert(String::from(name), match attr["text"]["value"].as_str() {
+                                 Some(value) => String::from(value),
+                                 None => String::from("")
+                             });
+
+                         },
+                         None => {
+                             // Not too sure yet what to do if we don't find a name.  Suspect response.
+                         }
+
+                     }
+
+                 }
+             },
+             None => {
+                 // Nothing to do.
+             }
+
+         };
+
+         // If the hostname attribute isn't explicitly set as an attribute, we will implicitly add
+         // the hostname in the offer
+         if !attributes.contains_key("hostname") {
+             attributes.insert(String::from("hostname"), String::from(value["hostname"].as_str().unwrap()));
+         }
+
          Offer {
              offer_id: String::from(value["id"]["value"].as_str().unwrap()),
              agent_id: String::from(value["agent_id"]["value"].as_str().unwrap()),
@@ -227,6 +287,7 @@ impl Offer {
              gpus,
              mem,
              disk,
+             attributes
          }
 
      }
@@ -458,14 +519,13 @@ fn split(input: String) -> Vec<String> {
 
 fn get_argument_value(input: &str) -> String {
     String::from(&*split(String::from(input))[0])
-
 }
 
 fn get_arguments(input: &str) -> Vec<String> {
     split(String::from(input))[1..].to_vec()
 }
 
-pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agent_id: &'a str, task_id: &'a str, task_info: &'b RequestedTaskInfo) -> Call {
+pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agent_id: &'a str, task_id: &'a str, task_info: &'b RequestedTaskInfo, tty_mode: &TTYMode) -> Call {
     let env_args = task_info.env_args.clone();
 
     let mut env_vars: Vec<Variable> = vec![];
@@ -512,11 +572,55 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                         volumes: vec![],
                                         docker: DockerInfo {
                                             image: String::from(&*task_info.image_name),
-                                            force_pull_image: true,
+                                            force_pull_image: task_info.force_pull,
                                             privileged: false,
                                             network: DockerInfoNetwork::Bridge,
                                             parameters: vec![],
                                             port_mappings: vec![]
+                                        },
+                                        tty_info: match *tty_mode {
+                                            TTYMode::Headless => None,
+                                            TTYMode::Interactive => {
+                                                // We are going to grab the current window size to set as the tty size in Mesos.
+                                                let terminal_size = terminal_size();
+
+                                                if task_info.verbose_output {
+                                                    println!("Interactive mode");
+                                                }
+
+                                                if let Some((Width(w), Height(h))) = terminal_size {
+
+                                                    if task_info.verbose_output {
+                                                        println!("Your terminal is {} cols wide and {} lines tall", w, h);
+                                                    }
+
+                                                    Some(TTYInfo {
+
+                                                        window_size: WindowSize {
+                                                            rows: h,
+                                                            columns: w
+                                                        }
+
+                                                    })
+
+                                                } else {
+
+                                                    if task_info.verbose_output {
+                                                        println!("Unable to get terminal size.  Using default of 120x40");
+                                                    }
+
+                                                    Some(TTYInfo {
+
+                                                        window_size: WindowSize {
+                                                            rows: 40,
+                                                            columns: 120
+                                                        }
+
+                                                    })
+
+                                                }
+
+                                            }
                                         }
                                     }
                                 },
