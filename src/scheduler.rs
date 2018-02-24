@@ -1,14 +1,20 @@
 use std::str::from_utf8;
 use std::process::exit;
+use std::io::stdout;
+use std::io::Write;
+use std::io::Read;
 
 use hyper::header::{Headers, ContentType};
 use reqwest;
 use serde_json;
 use serde_json::{Value};
 use types;
+use console;
 use rand::{thread_rng, Rng};
 use base64::{decode};
-use std::io::Read;
+
+use regex;
+
 
 header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 
@@ -19,10 +25,11 @@ enum SchedulerState {
     Running,
 }
 
-pub struct Scheduler<'a, 'b: 'a> {
+pub struct Scheduler<'a> {
+    operator: &'a console::Console,
     state: SchedulerState,
     scheduler_url: &'a str,
-    task_info: &'b types::RequestedTaskInfo,
+    task_info: &'a types::RequestedTaskInfo,
     framework_id: String,
     stream_id: String,
     agent_id: Option<String>,
@@ -33,11 +40,12 @@ pub struct Scheduler<'a, 'b: 'a> {
     sandbox_path: Option<String>
 }
 
-impl<'a, 'b: 'a> Scheduler<'a, 'b> {
+impl<'a, 'b: 'a> Scheduler<'a> {
 
-    fn new(scheduler_url: &'a str, task_info: &'b types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a, 'b> {
+    fn new(operator: &'a console::Console, scheduler_url: &'a str, task_info: &'a types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a> {
 
         let new_scheduler = Scheduler {
+            operator: operator,
             state: SchedulerState::Started,
             scheduler_url,
             task_info,
@@ -96,16 +104,12 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
                                 if self.is_useable_offer(&offer) {
                                     self.accept_offer(&offer);
-
-                                } else {
-                                    // Decline the offer.
-                                    self.decline_offer(&offer);
+                                    continue;
                                 }
-                            } else {
-                                // We are already scheduled, decline the offer.
-                                self.decline_offer(&offer);
+
                             }
 
+                            self.decline_offer(&offer);
                         }
 
                     },
@@ -129,8 +133,8 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                         "REASON_CONTAINER_LAUNCH_FAILED" => {
 
                             error!("{}\n{}",
-                                    value["update"]["status"]["reason"].as_str().unwrap(),
-                                    value["update"]["status"]["message"].as_str().unwrap(),
+                                    value["update"]["status"]["reason"],
+                                    value["update"]["status"]["message"],
                             );
 
                             self.deregister_exit(1);
@@ -146,7 +150,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                                     set_running = true;
                                 },
                                 _ => {
-
+                                    // TODO: Possibly a bit of error handling here.
                                 }
 
                             }
@@ -169,7 +173,6 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
                             let value: Value = serde_json::from_str(unwrapped).unwrap();
 
                             if set_running {
-                                // We need to get the executor ID
                                 self.sandbox_path = Some(String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap()));
                                 self.state = SchedulerState::Running;
 
@@ -242,7 +245,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         match reqwest::get(agent_url.as_str()) {
 
             Ok(ref mut response) => {
-                println!("{}", response.text().unwrap());
+                writeln!(stdout(), "{}", response.text().unwrap());
             },
             Err(error) => {
                 error!("Failed to read STDOUT from agent: {}", error);
@@ -257,7 +260,7 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
         let body_content = serde_json::to_string(&request).unwrap();
 
         if !self.deliver_request(body_content) {
-            println!("Unable to send teardown call to master. Exitting anyway.");
+            println!("Unable to send teardown call to master. Exiting anyway.");
         }
 
         exit(exit_code);
@@ -285,10 +288,16 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
             &offer.offer_id,
             &offer.agent_id,
             &task_id,
-            &self.task_info
+            &self.task_info,
+            &self.task_info.tty_mode
         );
 
         let body_content = serde_json::to_string(&request).unwrap();
+
+        if self.task_info.verbose_output {
+            println!("Offer: {}", body_content);
+        }
+
         let output = body_content.clone();
 
         if self.deliver_request(body_content) {
@@ -323,9 +332,39 @@ impl<'a, 'b: 'a> Scheduler<'a, 'b> {
 
     }
 
+    fn is_useable_attribute(&self, attr_name: &String, attr_value: &String, offer: &types::Offer) -> bool {
+
+        for (name, value) in &offer.attributes {
+
+            if name.eq(attr_name.as_str()) {
+
+                if attr_value.starts_with("/") {
+                    let pattern = attr_value.trim_matches('/');
+                    let attr_regex = regex::Regex::new(pattern).unwrap();
+
+                    return attr_regex.is_match(value.as_str());
+
+                } else {
+                    return value.eq(attr_value.as_str());
+                }
+
+            }
+
+        }
+
+        return false;
+    }
+
     fn is_useable_offer(&self, offer: &types::Offer) -> bool {
         // Real basic check for now.  Does the offer have enough resources for us?
-        //TODO: Make this check attributes.
+        for (key, value) in self.task_info.attrs.iter() {
+
+            if !self.is_useable_attribute(key, value, offer) {
+                return false;
+            }
+
+        }
+
         offer.cpus >= self.task_info.cpus &&
             offer.gpus >= self.task_info.gpus &&
             offer.disk >= self.task_info.disk &&
@@ -449,7 +488,7 @@ fn read_next_message(response: &mut reqwest::Response) -> String {
     buffer
 }
 
-pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
+pub fn execute<'a>(console: &'a console::Console, mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
     let mut scheduler_uri :String = String::from("http://");
 
     scheduler_uri.push_str(mesos_host);
@@ -498,15 +537,22 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
 
                 Some(id) => {
 
-                    if task_info.verbose_output {
-                        println!("Stream id {}", id);
-                    }
+                    if !id.is_empty() {
 
-                    let mut scheduler = Scheduler::new(&scheduler_uri, task_info, id);
+                        if task_info.verbose_output {
+                            println!("Stream id {}", id);
+                        }
 
-                    loop {
-                        let message = read_next_message(&mut response);
-                        scheduler.handle_message(message);
+                        let mut scheduler = Scheduler::new(console, &scheduler_uri, task_info, id);
+
+                        loop {
+                            let message = read_next_message(&mut response);
+                            scheduler.handle_message(message);
+                        }
+
+                    } else {
+                        error!("Received empty steam id from Mesos");
+                        exit(1);
                     }
 
                 },
@@ -517,7 +563,9 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
             };
 
         },
-        Err(_) => {}
+        Err(e) => {
+            error!("{}", e);
+        }
 
     };
 
