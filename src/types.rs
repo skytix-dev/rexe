@@ -1,6 +1,6 @@
-use serde_json::{Value};
+use serde_json::Value;
 use std::collections::HashMap;
-use terminal_size::{Width, Height, terminal_size};
+use terminal_size::{Height, terminal_size, Width};
 
 pub enum TTYMode {
     Interactive,
@@ -18,7 +18,8 @@ pub struct RequestedTaskInfo {
     pub verbose_output: bool,
     pub tty_mode: TTYMode,
     pub attrs: HashMap<String, String>,
-    pub force_pull: bool
+    pub force_pull: bool,
+    pub stderr: bool
 }
 
 #[derive(Serialize, Debug)]
@@ -365,7 +366,7 @@ pub struct Event {
 
 #[derive(Serialize)]
 pub struct ValueContainer {
-    value: String,
+    pub value: String,
 }
 
 #[derive(Serialize)]
@@ -453,6 +454,59 @@ pub struct AcknowledgeCall {
     message_type: CallType,
     framework_id: FrameworkID,
     acknowledge: Acknowledge
+}
+
+#[derive(Serialize)]
+pub struct ReadFileRequestData {
+    pub length: u32,
+    pub offset: u32,
+    pub path: String
+}
+
+#[derive(Deserialize)]
+pub struct ReadFileResponseData {
+    pub size: u32,
+    pub data: String
+}
+
+#[derive(Serialize)]
+pub struct ReadFileRequest {
+    #[serde(rename = "type")]
+    pub request_type: String,
+    pub read_file: ReadFileRequestData
+}
+
+#[derive(Deserialize)]
+pub struct ReadFileResponse {
+    #[serde(rename = "type")]
+    pub request_type: String,
+    pub read_file: ReadFileResponseData
+}
+
+#[derive(Serialize)]
+pub struct AttachContainerOutput {
+    pub container_id: ValueContainer
+}
+
+#[derive(Serialize)]
+pub struct AttachContainerOutputRequest {
+    #[serde(rename = "type")]
+    pub request_type: String,
+    pub attach_container_output: AttachContainerOutput
+}
+
+#[derive(Deserialize)]
+pub struct ContainerOutputData {
+    #[serde(rename = "type")]
+    pub output_type: String,
+    pub data: String
+}
+
+#[derive(Deserialize)]
+pub struct AttachContainerOutputMessage {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub data: ContainerOutputData
 }
 
 fn build_resources(task_info: &RequestedTaskInfo) -> Vec<Resource> {
@@ -627,7 +681,10 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                 command: CommandInfo {
                                     value: get_argument_value(&*task_info.args),
                                     arguments: get_arguments(&*task_info.args),
-                                    shell: false,
+                                    shell: match *tty_mode {
+                                        TTYMode::Headless => false,
+                                        TTYMode::Interactive => true
+                                    },
                                     environment
                                 },
                                 resources: {

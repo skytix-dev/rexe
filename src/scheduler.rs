@@ -1,20 +1,18 @@
-use std::str::from_utf8;
-use std::process::exit;
-use std::io::stdout;
-use std::io::Write;
-use std::io::Read;
-
-use hyper::header::{Headers, ContentType};
+use base64::decode;
+use console;
+use hyper::header::{ContentType, Headers};
+use network;
+use rand::{Rng, thread_rng};
+use regex;
 use reqwest;
 use serde_json;
-use serde_json::{Value};
+use serde_json::Value;
+use std::io::Read;
+use std::io::stdout;
+use std::io::Write;
+use std::process::exit;
+use std::str::from_utf8;
 use types;
-use console;
-use rand::{thread_rng, Rng};
-use base64::{decode};
-
-use regex;
-
 
 header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 
@@ -26,7 +24,7 @@ enum SchedulerState {
 }
 
 pub struct Scheduler<'a> {
-    operator: &'a console::Console,
+    console: Option<Box<console::Console>>,
     state: SchedulerState,
     scheduler_url: &'a str,
     task_info: &'a types::RequestedTaskInfo,
@@ -37,15 +35,15 @@ pub struct Scheduler<'a> {
     agent_hostname: Option<String>,
     agent_port: Option<i32>,
     task_id: Option<String>,
-    sandbox_path: Option<String>
+    sandbox_path: Option<String>,
 }
 
 impl<'a, 'b: 'a> Scheduler<'a> {
 
-    fn new(operator: &'a console::Console, scheduler_url: &'a str, task_info: &'a types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a> {
+    fn new(scheduler_url: &'a str, task_info: &'a types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a> {
 
         let new_scheduler = Scheduler {
-            operator: operator,
+            console: None,
             state: SchedulerState::Started,
             scheduler_url,
             task_info,
@@ -172,11 +170,41 @@ impl<'a, 'b: 'a> Scheduler<'a> {
                             let bytes = value["update"]["status"]["data"].as_str();
                             let data: Vec<u8> = decode(bytes.unwrap()).unwrap();
                             let unwrapped = &String::from_utf8(data).unwrap();
-                            let value: Value = serde_json::from_str(unwrapped).unwrap();
+
+                            let unwrapped_value: Value = serde_json::from_str(unwrapped).unwrap();
 
                             if set_running {
-                                self.sandbox_path = Some(String::from(value[0]["Mounts"][0]["Source"].as_str().unwrap()));
                                 self.state = SchedulerState::Running;
+
+                                let mut agent_url: String = match self.agent_scheme {
+                                    Some(ref url) => String::from(url.as_str()),
+                                    None => String::from("")
+                                };
+
+                                agent_url.push_str("://");
+                                agent_url.push_str(self.agent_hostname.as_ref().unwrap().as_str());
+                                agent_url.push_str(":");
+                                agent_url.push_str(&self.agent_port.unwrap().to_string());
+                                agent_url.push_str("/api/v1");
+
+                                let mut console: Box<console::Console> = match self.task_info.tty_mode {
+                                    types::TTYMode::Headless => Box::new(
+                                        console::HeadlessConsole::new(
+                                            agent_url.as_str(),
+                                            unwrapped_value[0]["Mounts"][0]["Source"].as_str().unwrap(),
+                                            self.task_info.stderr
+                                        )
+                                    ),
+                                    types::TTYMode::Interactive => Box::new(
+                                        console::InteractiveConsole::new(
+                                            agent_url.as_str(),
+                                            value["update"]["status"]["container_status"]["container_id"]["value"].as_str().unwrap(),
+                                            self.task_info.stderr
+                                        )
+                                    )
+                                };
+
+                                self.console = Some(console);
 
                                 if self.task_info.verbose_output {
                                     println!("Task is now running")
@@ -196,7 +224,15 @@ impl<'a, 'b: 'a> Scheduler<'a> {
                                         println!("Task has finished")
                                     }
 
-                                    self.fetch_stdout();
+                                    match self.console {
+
+                                        Some(ref mut console) => console.finish(),
+                                        None => {
+                                            // No console to close.
+                                        }
+
+                                    };
+
                                 },
                                 _ => {
                                     println!("Unable to output STDOUT due to inconsistent state.  TASK_FINISHED received before app was marked as running.");
@@ -217,43 +253,6 @@ impl<'a, 'b: 'a> Scheduler<'a> {
             },
             _ => println!("Unhandled event message: {}", message),
         };
-
-    }
-
-    fn fetch_stdout(&mut self) {
-
-        let mut agent_url: String = match self.agent_scheme {
-            Some(ref url) => String::from(url.as_str()),
-            None => String::from("")
-        };
-
-        agent_url.push_str("://");
-        agent_url.push_str(self.agent_hostname.as_ref().unwrap().as_str());
-        agent_url.push_str(":");
-        agent_url.push_str(&self.agent_port.unwrap().to_string());
-        agent_url.push_str("/files/download?path=");
-
-        match self.sandbox_path {
-
-            Some(ref path) => {
-                agent_url.push_str(str::replace(path.as_str(), "/", "%2F").as_str());
-            },
-            _ => {}
-
-        };
-
-        agent_url.push_str("/stdout");
-
-        match reqwest::get(agent_url.as_str()) {
-
-            Ok(ref mut response) => {
-                writeln!(stdout(), "{}", response.text().unwrap());
-            },
-            Err(error) => {
-                error!("Failed to read STDOUT from agent: {}", error);
-            }
-
-        }
 
     }
 
@@ -402,95 +401,7 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
 }
 
-fn get_header_string_value<'a>(name: &'a str, headers: &'a Headers) -> Option<String> {
-    let header_option = headers.get_raw(name);
-    let mut value = String::from("");
-
-    match header_option {
-
-        Some(header) => {
-
-            for line in header.into_iter() {
-                let data: &[u8] = line;
-
-                match String::from_utf8(Vec::from(data)) {
-                    Ok(field_value) => value.push_str(&field_value[..]),
-                    Err(_) => error!("Error while reading header value")
-                }
-
-            }
-
-        },
-        None => {},
-    }
-
-    Some(value)
-}
-
-fn read_next_message(response: &mut reqwest::Response) -> String {
-    let mut msg_length_str = String::from("");
-    let mut buffer: String = String::from("");
-    let mut have_msg_length = false;
-
-    while !have_msg_length {
-        let mut buf: Vec<u8> = vec![0; 1];
-
-        match response.read(&mut buf[..]) {
-
-            Ok(_) => {
-                let resp_str = from_utf8(&buf).unwrap();
-
-                for c in resp_str.chars() {
-
-                    if !have_msg_length {
-                        // We need to start reading looking for a newline character.  This string will then be the number of bytes we need to read for the next message.
-                        if c == '\n' {
-                            have_msg_length = true;
-
-                        } else {
-                            msg_length_str.push_str(c.to_string().as_str());
-                        }
-
-                    } else {
-                        // We may have found the end-of-line and these characters are part of the message body.
-                        buffer.push_str(c.to_string().as_str());
-                    }
-
-                }
-
-            },
-            Err(e) => {
-                error!("{}", e);
-                exit(1);
-            }
-
-        };
-
-    }
-
-    let msg_len = msg_length_str.parse::<usize>().unwrap() - buffer.len();
-    let mut buf: Vec<u8> = vec![0; msg_len];
-
-    match response.read_exact(&mut buf[..]) {
-
-        Ok(_) => {
-
-            match from_utf8(&buf) {
-                Ok(value) => buffer.push_str(value),
-                Err(_) => {}
-            }
-
-        },
-        Err(e) => {
-            error!("{}", e);
-            exit(1);
-        }
-    }
-
-    buffer
-}
-
-pub fn execute<'a>(console: &'a console::Console, mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
+pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
     let mut scheduler_uri :String = String::from("http://");
 
     scheduler_uri.push_str(mesos_host);
@@ -535,7 +446,7 @@ pub fn execute<'a>(console: &'a console::Console, mesos_host: &'a str, task_info
 
         Ok(mut response) => {
 
-            match get_header_string_value("Mesos-Stream-Id", response.headers()) {
+            match network::get_header_string_value("Mesos-Stream-Id", response.headers()) {
 
                 Some(id) => {
 
@@ -545,10 +456,10 @@ pub fn execute<'a>(console: &'a console::Console, mesos_host: &'a str, task_info
                             println!("Stream id {}", id);
                         }
 
-                        let mut scheduler = Scheduler::new(console, &scheduler_uri, task_info, id);
+                        let mut scheduler = Scheduler::new(&scheduler_uri, task_info, id);
 
                         loop {
-                            let message = read_next_message(&mut response);
+                            let message = network::read_next_message(&mut response);
                             scheduler.handle_message(message);
                         }
 
