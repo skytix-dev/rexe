@@ -28,7 +28,9 @@ mod network;
 fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     let verbose_output: bool = matches.occurrences_of("verbose") > 0;
     let stderr: bool = matches.occurrences_of("stderr") > 0;
+    let shell: bool = matches.occurrences_of("shell") > 0;
     let cpus_param = matches.value_of("cpus").unwrap().parse::<f32>();
+
     let cpus: f32;
 
     let image_name = String::from(matches.value_of("IMAGE").unwrap());
@@ -177,7 +179,8 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         tty_mode,
         attrs,
         force_pull: matches.occurrences_of("force_pull") > 0,
-        stderr
+        stderr,
+        shell
     }
 }
 
@@ -186,7 +189,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.4.0")
+            .version("0.5.0")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
             .arg(Arg::with_name("mesos")
@@ -245,7 +248,12 @@ fn main() {
                 .required(false)
                 .help("Specify the number of GPUs required")
                 .takes_value(true))
-
+            .arg(Arg::with_name("shell")
+                .short("s")
+                .long("shell")
+                .required(false)
+                .help("Invoke with shell mode on CommandInfo")
+                .takes_value(false))
             .arg(Arg::with_name("verbose")
                 .long("verbose")
                 .required(false)
