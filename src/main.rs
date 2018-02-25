@@ -1,32 +1,33 @@
-extern crate clap;
-extern crate env_logger;
-extern crate regex;
-extern crate serde;
-extern crate serde_json;
-extern crate ctrlc;
-extern crate rand;
 extern crate base64;
-extern crate reqwest;
-extern crate terminal_size;
-
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate serde_derive;
+extern crate clap;
+extern crate ctrlc;
+extern crate env_logger;
 #[macro_use]
 extern crate hyper;
+#[macro_use]
+extern crate log;
+extern crate rand;
+extern crate regex;
+extern crate reqwest;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+extern crate terminal_size;
+
+use clap::{App, Arg, ArgMatches};
+use regex::Regex;
+use std::collections::HashMap;
+use types::RequestedTaskInfo;
 
 mod scheduler;
 mod console;
 mod types;
-
-use clap::{Arg, App, ArgMatches};
-use types::RequestedTaskInfo;
-use std::collections::HashMap;
-use regex::Regex;
+mod network;
 
 fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     let verbose_output: bool = matches.occurrences_of("verbose") > 0;
+    let stderr: bool = matches.occurrences_of("stderr") > 0;
     let cpus_param = matches.value_of("cpus").unwrap().parse::<f32>();
     let cpus: f32;
 
@@ -175,7 +176,8 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         verbose_output,
         tty_mode,
         attrs,
-        force_pull: matches.occurrences_of("force_pull") > 0
+        force_pull: matches.occurrences_of("force_pull") > 0,
+        stderr
     }
 }
 
@@ -184,14 +186,21 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("1.0")
+            .version("0.4.0")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
             .arg(Arg::with_name("mesos")
                 .required(true)
                 .help("Mesos master host:port")
+                .value_name("MESOS_MASTER")
                 .index(1)
                 .takes_value(true))
+            .arg(Arg::with_name("IMAGE")
+                .index(2)
+                .help("Name of docker image")
+                .required(true)
+                .takes_value(true)
+            )
             .arg(Arg::with_name("attr")
                 .short("a")
                 .required(false)
@@ -203,13 +212,13 @@ fn main() {
                 .long("cpus")
                 .value_name("#CPUS")
                 .default_value("1")
-                .help("Specify the number of cpus required.  Default: 1")
+                .help("Specify the number of cpus required")
                 .takes_value(true))
             .arg(Arg::with_name("mem")
                 .short("m")
                 .long("memory")
                 .value_name("MEMORY")
-                .help("Specify the amount memory required. Default: 256")
+                .help("Specify the amount memory required")
                 .default_value("256")
                 .takes_value(true))
             .arg(Arg::with_name("disk")
@@ -223,7 +232,7 @@ fn main() {
                 .short("e")
                 .required(false)
                 .multiple(true)
-                .help("Environment variables")
+                .help("Environment variables to pass to container.  Eg. ENV_NAME=value")
                 .takes_value(true))
             .arg(Arg::with_name("force_pull")
                 .long("force-pull")
@@ -236,18 +245,17 @@ fn main() {
                 .required(false)
                 .help("Specify the number of GPUs required")
                 .takes_value(true))
-            .arg(Arg::with_name("IMAGE")
-                .short("i")
-                .help("Name of docker image")
-                .required(true)
-                .takes_value(true)
-            )
+
             .arg(Arg::with_name("verbose")
                 .long("verbose")
                 .required(false)
                 .help("Verbose output")
             )
-
+            .arg(Arg::with_name("stderr")
+                .long("stderr")
+                .required(false)
+                .help("Fetch STDERR as well")
+            )
             /*.arg(
                 Arg::with_name("interactive")
                 .short("I")
@@ -257,8 +265,9 @@ fn main() {
             )*/
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .index(2)
+                .index(3)
                 .required(false)
+                .multiple(true)
             )
             .get_matches();
 
@@ -270,7 +279,6 @@ fn main() {
         }
 
         scheduler::execute(
-            &*console::new(&mesos_master, &task_info),
             &mesos_master,
             &task_info
         );

@@ -1,5 +1,5 @@
 name: rexe
-version: '0.3'
+version: '0.4'
 summary: Synchronous task executor for Mesos
 description: |
   Execute container tasks in a Mesos cluster synchronously with STDOUT piped back to the caller.
