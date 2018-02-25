@@ -18,3 +18,5 @@ parts:
 apps:
   rexe:
     command: rexe
+    plugs:
+      - network
