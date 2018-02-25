@@ -19,7 +19,8 @@ pub struct RequestedTaskInfo {
     pub tty_mode: TTYMode,
     pub attrs: HashMap<String, String>,
     pub force_pull: bool,
-    pub stderr: bool
+    pub stderr: bool,
+    pub shell: bool
 }
 
 #[derive(Serialize, Debug)]
@@ -679,12 +680,19 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                     }
                                 },
                                 command: CommandInfo {
-                                    value: get_argument_value(&*task_info.args),
-                                    arguments: get_arguments(&*task_info.args),
-                                    shell: match *tty_mode {
-                                        TTYMode::Headless => false,
-                                        TTYMode::Interactive => true
+                                    value: match task_info.shell {
+                                        true => {
+                                            String::from(&*task_info.args)
+                                        },
+                                        false => {
+                                            get_argument_value(&*task_info.args)
+                                        }
                                     },
+                                    arguments: match task_info.shell {
+                                        true => vec![],
+                                        false => get_arguments(&*task_info.args)
+                                    },
+                                    shell: task_info.shell,
                                     environment
                                 },
                                 resources: {
