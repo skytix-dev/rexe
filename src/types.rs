@@ -8,6 +8,7 @@ pub enum TTYMode {
 }
 
 pub struct RequestedTaskInfo {
+    pub executor: String,
     pub image_name: String,
     pub cpus: f32,
     pub gpus: i32,
@@ -173,7 +174,7 @@ pub struct TaskInfo {
     name: String,
     task_id: ValueContainer,
     agent_id: ValueContainer,
-    container: ContainerInfo,
+    container: Option<ContainerInfo>,
     command: CommandInfo,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     resources: Vec<Resource>
@@ -632,8 +633,8 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                 name: String::from("rexe-command"),
                                 task_id: ValueContainer { value: String::from(task_id) },
                                 agent_id: ValueContainer { value: String::from(agent_id) },
-                                container: {
-                                    ContainerInfo {
+                                container: match task_info.executor.as_str() {
+                                    "docker" => Some(ContainerInfo {
                                         container_type: ContainerInfoType::Docker,
                                         volumes: vec![],
                                         docker: DockerInfo {
@@ -688,7 +689,8 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
 
                                             }
                                         }
-                                    }
+                                    }),
+                                    _ => None
                                 },
                                 command: CommandInfo {
                                     value: match task_info.shell {

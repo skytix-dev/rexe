@@ -26,6 +26,7 @@ mod types;
 mod network;
 
 fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
+    let executor: String = String::from(matches.value_of("executor").unwrap());
     let verbose_output: bool = matches.occurrences_of("verbose") > 0;
     let stderr: bool = matches.occurrences_of("stderr") > 0;
     let shell: bool = matches.occurrences_of("shell") > 0;
@@ -168,6 +169,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     }
 
     RequestedTaskInfo {
+        executor,
         image_name,
         cpus,
         gpus,
@@ -189,19 +191,29 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.5.1")
+            .version("0.6.0")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
+
             .arg(Arg::with_name("mesos")
                 .required(true)
                 .help("Mesos master host:port")
                 .value_name("MESOS_MASTER")
                 .index(1)
-                .takes_value(true))
-            .arg(Arg::with_name("IMAGE")
+            )
+
+            .arg(Arg::with_name("executor")
                 .index(2)
-                .help("Name of docker image")
+                .help("Mesos executor to use")
+                .possible_values(&["docker", "exec"])
+                .value_name("EXECUTOR")
                 .required(true)
+            )
+
+            .arg(Arg::with_name("IMAGE")
+                .index(3)
+                .help("Name of docker image")
+                .required(false)
                 .takes_value(true)
             )
             .arg(Arg::with_name("attr")
@@ -264,16 +276,9 @@ fn main() {
                 .required(false)
                 .help("Fetch STDERR as well")
             )
-            /*.arg(
-                Arg::with_name("interactive")
-                .short("I")
-                .help("Use interactive mode. STDIN will be redirected to container")
-                .required(false)
-                .multiple(false)
-            )*/
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .index(3)
+                .index(4)
                 .required(false)
                 .multiple(true)
             )

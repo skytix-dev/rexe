@@ -23,6 +23,36 @@ enum SchedulerState {
     Running,
 }
 
+/**
+ * In order to get the sandbox path, we need to know the work_dir on the agent we are talking to.
+ * so we need to get that from the agent state endpoint.
+ **/
+fn get_sandbox_path(agent_state_url: String, agent_id: &str, framework_id: &str, executor_id: &str, container_id: &str) -> String {
+    let url = agent_state_url.as_str();
+    let state = reqwest::get(url).unwrap().text().unwrap();
+
+    let json: Value = serde_json::from_str(state.as_str()).unwrap();
+
+    let mut path: String = match json["flags"]["work_dir"].as_str() {
+        Some(path) => String::from(path),
+        None => {
+            error!("Unable to get work_dir from Mesos agent state.  Using default /var/lib/mesos");
+            String::from("/var/lib/mesos")
+        }
+    };
+
+    path.push_str("/slaves/");
+    path.push_str(agent_id);
+    path.push_str("/frameworks/");
+    path.push_str(framework_id);
+    path.push_str("/executors/");
+    path.push_str(executor_id);
+    path.push_str("/runs/");
+    path.push_str(container_id);
+
+    path
+}
+
 pub struct Scheduler<'a> {
     console: Option<Box<console::Console>>,
     state: SchedulerState,
@@ -147,6 +177,10 @@ impl<'a, 'b: 'a> Scheduler<'a> {
                             // We need to get the uuid from the message to send an acknowledgement of it.
                             let mut set_running: bool = false;
 
+                            if self.task_info.verbose_output {
+                                println!("Task Running:\n{}", message);
+                            }
+
                             match self.state {
 
                                 SchedulerState::Scheduled => {
@@ -171,11 +205,8 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
                             };
 
-                            let bytes = value["update"]["status"]["data"].as_str();
-                            let data: Vec<u8> = decode(bytes.unwrap()).unwrap();
-                            let unwrapped = &String::from_utf8(data).unwrap();
-
-                            let unwrapped_value: Value = serde_json::from_str(unwrapped).unwrap();
+                            let executor_id = value["update"]["status"]["executor_id"]["value"].as_str().unwrap();
+                            let container_id = value["update"]["status"]["container_status"]["container_id"]["value"].as_str().unwrap();
 
                             if set_running {
                                 self.state = SchedulerState::Running;
@@ -189,19 +220,30 @@ impl<'a, 'b: 'a> Scheduler<'a> {
                                 agent_url.push_str(self.agent_hostname.as_ref().unwrap().as_str());
                                 agent_url.push_str(":");
                                 agent_url.push_str(&self.agent_port.unwrap().to_string());
-                                agent_url.push_str("/api/v1");
+
+                                let mut api_url = agent_url.clone();
+                                let mut agent_state_url = agent_url.clone();
+
+                                api_url.push_str("/api/v1");
+                                agent_state_url.push_str("/state");
 
                                 let mut console: Box<console::Console> = match self.task_info.tty_mode {
                                     types::TTYMode::Headless => Box::new(
                                         console::HeadlessConsole::new(
-                                            agent_url.as_str(),
-                                            unwrapped_value[0]["Mounts"][0]["Source"].as_str().unwrap(),
+                                            api_url.as_str(),
+                                            get_sandbox_path(
+                                                agent_state_url,
+                                                self.agent_id.as_ref().unwrap().as_str(),
+                                                self.framework_id.as_str(),
+                                                executor_id,
+                                                container_id
+                                            ).as_str(),
                                             self.task_info.stderr
                                         )
                                     ),
                                     types::TTYMode::Interactive => Box::new(
                                         console::InteractiveConsole::new(
-                                            agent_url.as_str(),
+                                            api_url.as_str(),
                                             value["update"]["status"]["container_status"]["container_id"]["value"].as_str().unwrap(),
                                             self.task_info.stderr
                                         )
