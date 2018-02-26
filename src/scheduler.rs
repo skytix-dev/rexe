@@ -92,6 +92,10 @@ impl<'a, 'b: 'a> Scheduler<'a> {
             },
             "OFFERS" => {
 
+                if self.task_info.verbose_output {
+                    println!("New Offers:\n{}", message);
+                }
+
                 match value["offers"]["offers"].as_array() {
                     Some(offers) => {
 
@@ -112,7 +116,7 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
                     },
 
-                    None => println!("Didnt find any offers")
+                    None => println!("Didn't find any offers")
                 }
 
             },
