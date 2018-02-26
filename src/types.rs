@@ -222,15 +222,26 @@ impl Offer {
 
                  }
 
-                 cpus = resource_map.get("cpus").unwrap().parse::<f32>().unwrap();
+                 cpus = match resource_map.get("cpus") {
+                     Some(value) => value.parse::<f32>().unwrap(),
+                     None => 0.0f32
+                 };
 
                  gpus = match resource_map.get("gpus") {
                      Some(value) => value.parse::<i32>().unwrap(),
                      None => 0
                  };
 
-                 mem = resource_map.get("mem").unwrap().parse::<f32>().unwrap();
-                 disk = resource_map.get("disk").unwrap().parse::<f32>().unwrap();
+                 mem = match resource_map.get("mem") {
+                     Some(value) => value.parse::<f32>().unwrap(),
+                     None => 0.0f32
+                 };
+
+                 disk = match resource_map.get("disk") {
+                     Some(value) => value.parse::<f32>().unwrap(),
+                     None => 0.0f32
+                 };
+
              },
              None => {
                  // Set everything to be be 0 I guess?

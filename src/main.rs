@@ -189,7 +189,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.5.0")
+            .version("0.5.1")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
             .arg(Arg::with_name("mesos")
