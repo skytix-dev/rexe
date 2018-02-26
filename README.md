@@ -17,19 +17,22 @@ rexe <MESOS_URL> <IMAGE> <OPTIONS> -- <COMMAND_ARGS>
 
 Example:
 
-`rexe 10.9.10.1:5050 ubuntu:latest -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value --force-pull -- ls -la /`
+`rexe 10.9.10.1:5050 docker ubuntu:latest -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value --force-pull -- ls -la /`
+`rexe 10.9.10.1:5050 exec -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value -- ls -la /`
+
 
 ```
-Remote Executor 0.4.0
+Remote Executor 0.6.0
 Marc D. <marc@skytix.com.au>
 Synchronously execute tasks inside Mesos with STDOUT
 
 USAGE:
-    rexe.exe [FLAGS] [OPTIONS] <MESOS_MASTER> <IMAGE> [--] [ARGS]...
+    rexe.exe [FLAGS] [OPTIONS] <MESOS_MASTER> <EXECUTOR> [--] [ARGS]
 
 FLAGS:
         --force-pull    Force pull image
     -h, --help          Prints help information
+    -s, --shell         Invoke with shell mode on CommandInfo
         --stderr        Fetch STDERR as well
     -V, --version       Prints version information
         --verbose       Verbose output
@@ -45,6 +48,7 @@ OPTIONS:
 
 ARGS:
     <MESOS_MASTER>    Mesos master host:port
+    <EXECUTOR>        Mesos executor to use [possible values: docker, exec]
     <IMAGE>           Name of docker image
     <ARGS>...         Image arguments
 
