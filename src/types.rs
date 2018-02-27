@@ -9,7 +9,7 @@ pub enum TTYMode {
 
 pub struct RequestedTaskInfo {
     pub executor: String,
-    pub image_name: String,
+    pub image_name: Option<String>,
     pub cpus: f32,
     pub gpus: i32,
     pub mem: f32,
@@ -638,7 +638,10 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                         container_type: ContainerInfoType::Docker,
                                         volumes: vec![],
                                         docker: DockerInfo {
-                                            image: String::from(&*task_info.image_name),
+                                            image: match task_info.image_name {
+                                                Some(ref image) => image.clone(),
+                                                None => String::from("")
+                                            },
                                             force_pull_image: task_info.force_pull,
                                             privileged: false,
                                             network: DockerInfoNetwork::Bridge,

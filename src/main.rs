@@ -34,7 +34,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
     let cpus: f32;
 
-    let image_name = String::from(matches.value_of("IMAGE").unwrap());
+    let image_name = matches.value_of("IMAGE");
 
     if cpus_param.is_ok() {
         cpus = cpus_param.unwrap();
@@ -170,7 +170,10 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
     RequestedTaskInfo {
         executor,
-        image_name,
+        image_name: match matches.value_of("IMAGE") {
+            Some(image_name) => Some(String::from(image_name)),
+            None => None
+        },
         cpus,
         gpus,
         mem,
@@ -211,7 +214,7 @@ fn main() {
             )
 
             .arg(Arg::with_name("IMAGE")
-                .index(3)
+                .short("i")
                 .help("Name of docker image")
                 .required(false)
                 .takes_value(true)
@@ -278,8 +281,8 @@ fn main() {
             )
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .index(4)
-                .required(false)
+                .index(3)
+                .required(true)
                 .multiple(true)
             )
             .get_matches();
