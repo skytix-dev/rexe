@@ -29,8 +29,12 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     let executor: String = String::from(matches.value_of("executor").unwrap());
     let verbose_output: bool = matches.occurrences_of("verbose") > 0;
     let stderr: bool = matches.occurrences_of("stderr") > 0;
-    let shell: bool = matches.occurrences_of("shell") > 0;
     let cpus_param = matches.value_of("cpus").unwrap().parse::<f32>();
+
+    let shell: bool = match executor.as_str() {
+        "exec" => true,
+        _ => matches.occurrences_of("shell") > 0
+    };
 
     let cpus: f32;
 
@@ -214,7 +218,7 @@ fn main() {
             )
 
             .arg(Arg::with_name("IMAGE")
-                .short("i")
+                .index(3)
                 .help("Name of docker image")
                 .required(false)
                 .takes_value(true)
@@ -267,7 +271,7 @@ fn main() {
                 .short("s")
                 .long("shell")
                 .required(false)
-                .help("Invoke with shell mode on CommandInfo")
+                .help("Invoke with shell mode on CommandInfo.  Always enabled when executor is 'exec'.")
                 .takes_value(false))
             .arg(Arg::with_name("verbose")
                 .long("verbose")
@@ -281,9 +285,9 @@ fn main() {
             )
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .index(3)
                 .required(true)
                 .multiple(true)
+                .last(true)
             )
             .get_matches();
 
