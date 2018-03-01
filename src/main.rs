@@ -198,7 +198,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.6.0")
+            .version("0.7.0")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
 
@@ -285,7 +285,7 @@ fn main() {
             )
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .required(true)
+                .required(false)
                 .multiple(true)
                 .last(true)
             )
