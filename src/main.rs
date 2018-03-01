@@ -285,7 +285,7 @@ fn main() {
             )
             .arg(Arg::with_name("ARGS")
                 .help("Image arguments")
-                .required(true)
+                .required(false)
                 .multiple(true)
                 .last(true)
             )

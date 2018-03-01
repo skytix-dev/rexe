@@ -368,7 +368,11 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
         let request = types::decline_request(
             &self.framework_id,
-            &offer.offer_id
+            &offer.offer_id,
+            match (&self.state) {
+                &SchedulerState::Running => true,
+                _ => false
+            }
         );
 
         let body_content = serde_json::to_string(&request).unwrap();

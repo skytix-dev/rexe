@@ -388,10 +388,16 @@ pub struct Launch {
 }
 
 #[derive(Serialize)]
+pub struct Filters {
+    refuse_seconds: f32
+}
+
+#[derive(Serialize)]
 pub struct Accept {
     offer_ids: Vec<ValueContainer>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     operations: Vec<Operation>,
+    filters: Option<Filters>
 }
 
 #[derive(Serialize)]
@@ -718,14 +724,17 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                         ]
                     }
                 }
-            ]
+            ],
+            filters: Some(Filters {
+                refuse_seconds: 600f32
+            })
         }
 
     }
 
 }
 
-pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str) -> Call {
+pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str, is_running: bool) -> Call {
     // Sending an accept message with no operations is the same as a decline.  Means less code.
 
     Call {
@@ -735,7 +744,13 @@ pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str) -> Call {
             offer_ids: vec![ValueContainer {
                 value: String::from(offer_id),
             }],
-            operations: vec![]
+            operations: vec![],
+            filters: match is_running {
+                true => Some(Filters {
+                    refuse_seconds: 600f32
+                }),
+                false => None
+            }
         }
     }
 
