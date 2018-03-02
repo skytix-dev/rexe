@@ -142,6 +142,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
     }
 
+    let tty = matches.occurrences_of("tty") > 0;
     let tty_mode;
 
     if matches.occurrences_of("interactive") > 0 {
@@ -185,6 +186,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         args,
         env_args: env_options,
         verbose_output,
+        tty,
         tty_mode,
         attrs,
         force_pull: matches.occurrences_of("force_pull") > 0,
@@ -198,7 +200,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.7.0")
+            .version("0.7.1")
             .author("Marc D. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
 
@@ -267,9 +269,13 @@ fn main() {
                 .required(false)
                 .help("Specify the number of GPUs required")
                 .takes_value(true))
+            .arg(Arg::with_name("tty")
+                .short("t")
+                .required(false)
+                .help("Attach TTY")
+                .takes_value(false))
             .arg(Arg::with_name("shell")
                 .short("s")
-                .long("shell")
                 .required(false)
                 .help("Invoke with shell mode on CommandInfo.  Always enabled when executor is 'exec'.")
                 .takes_value(false))
