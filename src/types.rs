@@ -17,6 +17,7 @@ pub struct RequestedTaskInfo {
     pub args: String,
     pub env_args: HashMap<String, String>,
     pub verbose_output: bool,
+    pub tty: bool,
     pub tty_mode: TTYMode,
     pub attrs: HashMap<String, String>,
     pub force_pull: bool,
@@ -591,11 +592,56 @@ fn split(input: String) -> Vec<String> {
 }
 
 fn get_argument_value(input: &str) -> String {
-    String::from(&*split(String::from(input))[0])
+    let input_str = String::from(input);
+    let split: Vec<String> = split(input_str);
+
+    if split.len() > 0 {
+        String::from(&*split.get(0).unwrap().clone())
+
+    } else {
+        return String::from("")
+    }
 }
 
 fn get_arguments(input: &str) -> Vec<String> {
-    split(String::from(input))[1..].to_vec()
+    let split = split(String::from(input));
+
+    if split.len() > 0 {
+        split[1..].to_vec()
+
+    } else {
+        return vec![]
+    }
+
+}
+
+fn create_tty_info() -> TTYInfo {
+    let terminal_size = terminal_size();
+
+    if let Some((Width(w), Height(h))) = terminal_size {
+
+        TTYInfo {
+
+            window_size: WindowSize {
+                rows: h,
+                columns: w
+            }
+
+        }
+
+    } else {
+
+        TTYInfo {
+
+            window_size: WindowSize {
+                rows: 40,
+                columns: 120
+            }
+
+        }
+
+    }
+
 }
 
 pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agent_id: &'a str, task_id: &'a str, task_info: &'b RequestedTaskInfo, tty_mode: &TTYMode) -> Call {
@@ -655,47 +701,23 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                             port_mappings: vec![]
                                         },
                                         tty_info: match *tty_mode {
-                                            TTYMode::Headless => None,
+                                            TTYMode::Headless => {
+
+                                                if task_info.tty {
+                                                    Some(create_tty_info())
+
+                                                } else {
+                                                    None
+                                                }
+
+                                            },
                                             TTYMode::Interactive => {
                                                 // We are going to grab the current window size to set as the tty size in Mesos.
-                                                let terminal_size = terminal_size();
-
                                                 if task_info.verbose_output {
                                                     println!("Interactive mode");
                                                 }
 
-                                                if let Some((Width(w), Height(h))) = terminal_size {
-
-                                                    if task_info.verbose_output {
-                                                        println!("Your terminal is {} cols wide and {} lines tall", w, h);
-                                                    }
-
-                                                    Some(TTYInfo {
-
-                                                        window_size: WindowSize {
-                                                            rows: h,
-                                                            columns: w
-                                                        }
-
-                                                    })
-
-                                                } else {
-
-                                                    if task_info.verbose_output {
-                                                        println!("Unable to get terminal size.  Using default of 120x40");
-                                                    }
-
-                                                    Some(TTYInfo {
-
-                                                        window_size: WindowSize {
-                                                            rows: 40,
-                                                            columns: 120
-                                                        }
-
-                                                    })
-
-                                                }
-
+                                                Some(create_tty_info())
                                             }
                                         }
                                     }),
