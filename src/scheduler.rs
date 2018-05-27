@@ -141,7 +141,13 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
                             }
 
-                            self.decline_offer(&offer);
+                            let scheduled = self.is_scheduled();
+
+                            self.decline_offer(&offer, match scheduled {
+                                true => 600f32,
+                                false => 5f32
+                            });
+
                         }
 
                     },
@@ -288,6 +294,23 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
                             self.deregister_exit(0);
                         },
+                        "TASK_STARTING" => {
+                            if self.task_info.verbose_output {
+                                println!("Task is starting:\n{}", message);
+                            }
+
+                            match value["update"]["status"]["uuid"].as_str() {
+
+                                Some(uuid) => {
+                                    // Send acknowledgement.
+                                    self.acknowledge(uuid);
+                                },
+                                None => {
+                                    // Do nothing.
+                                }
+
+                            };
+                        },
                         _ => println!("Unhandled update state: {}\n{}", state, message),
                     },
                     None => {
@@ -364,7 +387,7 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 
     }
 
-    fn decline_offer(&mut self, offer: &types::Offer) {
+    fn decline_offer(&mut self, offer: &types::Offer, refuse_seconds: f32) {
 
         let request = types::decline_request(
             &self.framework_id,
@@ -372,7 +395,8 @@ impl<'a, 'b: 'a> Scheduler<'a> {
             match (&self.state) {
                 &SchedulerState::Running => true,
                 _ => false
-            }
+            },
+            refuse_seconds
         );
 
         let body_content = serde_json::to_string(&request).unwrap();

@@ -756,7 +756,7 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
 
 }
 
-pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str, is_running: bool) -> Call {
+pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str, is_running: bool, refuse_seconds: f32) -> Call {
     // Sending an accept message with no operations is the same as a decline.  Means less code.
 
     Call {
@@ -769,7 +769,7 @@ pub fn decline_request<'a>(framework_id: &'a str, offer_id: &'a str, is_running:
             operations: vec![],
             filters: match is_running {
                 true => Some(Filters {
-                    refuse_seconds: 600f32
+                    refuse_seconds
                 }),
                 false => None
             }
