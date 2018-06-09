@@ -201,7 +201,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.7.1")
+            .version("0.7.2")
             .author("Marc Dergacz. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
 
