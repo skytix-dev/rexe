@@ -6,6 +6,7 @@ use self::zookeeper::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
 use serde_json;
 use serde_json::Value;
 use std::time::Duration;
+use std::process::exit;
 
 struct ConnectionWatcher;
 impl Watcher for ConnectionWatcher {
@@ -79,12 +80,12 @@ pub fn discover_mesos_leader(master_config: &str) -> String {
                 }
 
                 error!("Unable to find any Mesos leaders in Zookeeper: {}", master_config);
-                return String::from("");
+                exit(1);
 
             },
             _ => {
                 error!("Unable to connect to Zookeeper cluster: {}", master_config);
-                return String::from("");
+                exit(1);
             }
         };
 
