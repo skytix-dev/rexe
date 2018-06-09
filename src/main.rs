@@ -207,7 +207,7 @@ fn main() {
 
             .arg(Arg::with_name("mesos")
                 .required(true)
-                .help("Mesos master/zookeeper URL.  RExe will perform leader discovery if provided a zookeeper URL otherwise http[s] can be provided.  Eg. zk://master1:2181,master2:2181,master3:2181/mesos or http://master1:5050")
+                .help("Mesos master/zookeeper URL.  RExe will perform leader discovery if provided a zookeeper URL otherwise http[s] can be provided.  Eg. master1:2181,master2:2181,master3:2181/mesos or http://master1:5050")
                 .value_name("MESOS_MASTER")
                 .index(1)
             )
