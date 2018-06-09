@@ -24,6 +24,7 @@ mod scheduler;
 mod console;
 mod types;
 mod network;
+mod mesos;
 
 fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
     let executor: String = String::from(matches.value_of("executor").unwrap());
@@ -206,7 +207,7 @@ fn main() {
 
             .arg(Arg::with_name("mesos")
                 .required(true)
-                .help("Mesos master host:port")
+                .help("Mesos master/zookeeper URL.  RExe will perform leader discovery if provided a zookeeper URL otherwise http[s] can be provided.  Eg. zk://master1:2181,master2:2181,master3:2181/mesos or http://master1:5050")
                 .value_name("MESOS_MASTER")
                 .index(1)
             )

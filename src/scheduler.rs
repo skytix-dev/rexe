@@ -13,6 +13,7 @@ use std::io::Write;
 use std::process::exit;
 use std::str::from_utf8;
 use types;
+use mesos;
 
 header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 
@@ -476,14 +477,10 @@ impl<'a, 'b: 'a> Scheduler<'a> {
 }
 
 pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo) {
-    let mut scheduler_uri :String = String::from("http://");
+    let mut scheduler_uri: String = mesos::discover_mesos_leader(mesos_host);
+    scheduler_uri.push_str("/api/v1/scheduler");
 
-    scheduler_uri.push_str(mesos_host);
-
-    let mut scheduler_path = scheduler_uri.clone();
-    scheduler_path.push_str("/api/v1/scheduler");
-
-    let url : &str = &scheduler_path[..];
+    let url : &str = &scheduler_uri[..];
 
     if task_info.verbose_output {
         println!("Sending request to: {}", url)
