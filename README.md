@@ -17,23 +17,24 @@ rexe <MESOS_URL> <IMAGE> <OPTIONS> -- <COMMAND_ARGS>
 
 Example:
 
-`rexe 10.9.10.1:5050 docker ubuntu:latest -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value --force-pull -- ls -la /`
-`rexe 10.9.10.1:5050 exec -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value -- ls -la /`
+`rexe 10.9.10.1:2181/mesos docker ubuntu:latest -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value --force-pull -- ls -la /`
+`rexe 10.9.10.1:2181/mesos exec -c 2 -m 1024 -a attribute=/pattern/ -a attribute2=value -e ENV_VAR=value -- ls -la /`
 
 
 ```
-Remote Executor 0.6.0
-Marc D. <marc@skytix.com.au>
+Remote Executor 0.7.2
+Marc Dergacz. <marc@skytix.com.au>
 Synchronously execute tasks inside Mesos with STDOUT
 
 USAGE:
-    rexe.exe [FLAGS] [OPTIONS] <MESOS_MASTER> <EXECUTOR> [--] [ARGS]
+    rexe.exe [FLAGS] [OPTIONS] <MESOS_MASTER> <EXECUTOR> [IMAGE] [-- <ARGS>...]
 
 FLAGS:
         --force-pull    Force pull image
     -h, --help          Prints help information
-    -s, --shell         Invoke with shell mode on CommandInfo
+    -s                  Invoke with shell mode on CommandInfo.  Always enabled when executor is 'exec'.
         --stderr        Fetch STDERR as well
+    -t                  Attach TTY
     -V, --version       Prints version information
         --verbose       Verbose output
 
@@ -47,7 +48,9 @@ OPTIONS:
     -m, --memory <MEMORY>    Specify the amount memory required [default: 256]
 
 ARGS:
-    <MESOS_MASTER>    Mesos master host:port
+    <MESOS_MASTER>    Mesos master/zookeeper URL.  RExe will perform leader discovery if provided a zookeeper URL
+                      otherwise http[s] can be provided.  Eg. master1:2181,master2:2181,master3:2181/mesos or
+                      http://master1:5050
     <EXECUTOR>        Mesos executor to use [possible values: docker, exec]
     <IMAGE>           Name of docker image
     <ARGS>...         Image arguments
