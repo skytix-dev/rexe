@@ -143,6 +143,36 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
     }
 
+    let mut volumes: Vec<(String, String, Option<String>)> = vec![];
+
+    if matches.is_present("volume") {
+        let volume_defs: Vec<_> = matches.values_of("volume").unwrap().collect();
+
+        for def in volume_defs {
+            let parts: Vec<&str> = def.split(":").collect();
+
+            match parts.len() {
+                2 => volumes.push((String::from(parts[0]), String::from(parts[1]), None)),
+                3 => {
+                    let mode = parts[2].to_uppercase();
+
+                    if mode == "RO" || mode == "RW" {
+                        volumes.push((String::from(parts[0]), String::from(parts[1]), Some(String::from(mode))));
+
+                    } else {
+                        error!("{} is not a valid VolumeMode", mode);
+                        std::process::exit(1);
+                    }
+                },
+                _ => {
+                    error!("Too many volume parameters");
+                    std::process::exit(1);
+                }
+            };
+
+        }
+    }
+
     let tty = matches.occurrences_of("tty") > 0;
     let tty_mode;
 
@@ -190,6 +220,7 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         tty,
         tty_mode,
         attrs,
+        volumes,
         force_pull: matches.occurrences_of("force_pull") > 0,
         stderr,
         shell
@@ -201,7 +232,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.7.2")
+            .version("0.7.3")
             .author("Marc Dergacz. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
 
@@ -280,6 +311,12 @@ fn main() {
                 .required(false)
                 .help("Invoke with shell mode on CommandInfo.  Always enabled when executor is 'exec'.")
                 .takes_value(false))
+            .arg(Arg::with_name("volume")
+                .short("v")
+                .required(false)
+                .multiple(true)
+                .help("Volume mapping - host_path:container_path:[RO|RW].  Eg.  /host/path:/container/path:RO  Defaults to RW access.")
+                .takes_value(true))
             .arg(Arg::with_name("verbose")
                 .long("verbose")
                 .required(false)
