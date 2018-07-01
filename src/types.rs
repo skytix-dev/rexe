@@ -20,6 +20,7 @@ pub struct RequestedTaskInfo {
     pub tty: bool,
     pub tty_mode: TTYMode,
     pub attrs: HashMap<String, String>,
+    pub volumes: Vec<(String, String, Option<String>)>,
     pub force_pull: bool,
     pub stderr: bool,
     pub shell: bool
@@ -669,6 +670,30 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
         environment = None;
     }
 
+    let mut volumes: Vec<Volume> = vec![];
+    let volume_defs = task_info.volumes.clone();
+
+    if task_info.volumes.len() > 0 {
+
+        for (host_path, container_path, volume_mode) in volume_defs {
+
+            volumes.push( Volume {
+                mode: match volume_mode {
+                    None => VolumeMode::RW,
+                    Some(mode) => match mode.as_str() {
+                        "RW" => VolumeMode::RW,
+                        "RO" => VolumeMode::RO,
+                        _ => VolumeMode::RW
+                    }
+                },
+                container_path,
+                host_path,
+            });
+
+        }
+
+    }
+
     Call {
         message_type: CallType::Accept,
         framework_id: FrameworkID { value: String::from(framework_id) },
@@ -688,7 +713,7 @@ pub fn accept_request<'a, 'b: 'a>(framework_id: &'a str, offer_id: &'a str, agen
                                 container: match task_info.executor.as_str() {
                                     "docker" => Some(ContainerInfo {
                                         container_type: ContainerInfoType::Docker,
-                                        volumes: vec![],
+                                        volumes,
                                         docker: DockerInfo {
                                             image: match task_info.image_name {
                                                 Some(ref image) => image.clone(),
