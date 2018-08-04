@@ -14,6 +14,11 @@ extern crate serde;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate terminal_size;
+extern crate timer;
+extern crate chrono;
+extern crate strum;
+#[macro_use]
+extern crate strum_macros; // 0.10.0
 
 use clap::{App, Arg, ArgMatches};
 use regex::Regex;
@@ -204,6 +209,11 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
 
     }
 
+    let mut timeout: i64 = match matches.value_of("timeout") {
+        Some(value) => value.parse::<i64>().unwrap(),
+        None => 60
+    };
+
     RequestedTaskInfo {
         executor,
         image_name: match matches.value_of("IMAGE") {
@@ -223,7 +233,8 @@ fn generate_task_info<'a>(ref matches: &'a ArgMatches) -> RequestedTaskInfo {
         volumes,
         force_pull: matches.occurrences_of("force_pull") > 0,
         stderr,
-        shell
+        shell,
+        timeout
     }
 }
 
@@ -232,7 +243,7 @@ fn main() {
 
     if logger.is_ok() {
         let matches = App::new("Remote Executor")
-            .version("0.7.3")
+            .version("0.7.4")
             .author("Marc Dergacz. <marc@skytix.com.au>")
             .about("Synchronously execute tasks inside Mesos with STDOUT")
 
@@ -242,7 +253,6 @@ fn main() {
                 .value_name("MESOS_MASTER")
                 .index(1)
             )
-
             .arg(Arg::with_name("executor")
                 .index(2)
                 .help("Mesos executor to use")
@@ -250,7 +260,6 @@ fn main() {
                 .value_name("EXECUTOR")
                 .required(true)
             )
-
             .arg(Arg::with_name("IMAGE")
                 .index(3)
                 .help("Name of docker image")
@@ -306,6 +315,11 @@ fn main() {
                 .required(false)
                 .help("Attach TTY")
                 .takes_value(false))
+            .arg(Arg::with_name("timeout")
+                .short("T")
+                .required(false)
+                .help("Resource wait timeout. Time in seconds on how long RExe should wait for usable resource offers before giving up. Default: 60.  Set to <= 0 to wait indefinitely.")
+                .takes_value(true))
             .arg(Arg::with_name("shell")
                 .short("s")
                 .required(false)

@@ -44,6 +44,7 @@ pub fn read_next_message(response: &mut reqwest::Response) -> String {
                 let resp_str = from_utf8(&buf).unwrap();
 
                 for c in resp_str.chars() {
+
                     if !have_msg_length {
                         // We need to start reading looking for a newline character.  This string will then be the number of bytes we need to read for the next message.
                         if c == '\n' {
