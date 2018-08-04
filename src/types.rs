@@ -23,7 +23,8 @@ pub struct RequestedTaskInfo {
     pub volumes: Vec<(String, String, Option<String>)>,
     pub force_pull: bool,
     pub stderr: bool,
-    pub shell: bool
+    pub shell: bool,
+    pub timeout: i64
 }
 
 #[derive(Serialize, Debug)]

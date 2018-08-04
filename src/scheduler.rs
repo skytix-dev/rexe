@@ -1,6 +1,8 @@
 use base64::decode;
+use chrono;
 use console;
 use hyper::header::{ContentType, Headers};
+use mesos;
 use network;
 use rand::{Rng, thread_rng};
 use regex;
@@ -12,11 +14,18 @@ use std::io::stdout;
 use std::io::Write;
 use std::process::exit;
 use std::str::from_utf8;
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Mutex;
+use std::sync::RwLock;
+use timer::{Guard, Timer};
 use types;
-use mesos;
+use strum::AsStaticRef;
 
 header! { (MesosStreamId, "Mesos-Stream-Id") => [String] }
 
+#[derive(Debug,PartialEq,AsStaticStr)]
 enum SchedulerState {
     Started,
     Subscribed,
@@ -67,11 +76,15 @@ pub struct Scheduler<'a> {
     agent_port: Option<i32>,
     task_id: Option<String>,
     sandbox_path: Option<String>,
+    timeout_timer: Timer,
+    timeout_timer_guard: Option<Guard>,
+    timeout_timer_state_tx: Option<Sender<SchedulerState>>
 }
 
 impl<'a, 'b: 'a> Scheduler<'a> {
 
     fn new(scheduler_url: &'a str, task_info: &'a types::RequestedTaskInfo, stream_id: String) -> Scheduler<'a> {
+        let running_state = Arc::new(RwLock::new(true));
 
         let new_scheduler = Scheduler {
             console: None,
@@ -86,9 +99,43 @@ impl<'a, 'b: 'a> Scheduler<'a> {
             agent_port: None,
             task_id: None,
             sandbox_path: None,
+            timeout_timer: Timer::new(),
+            timeout_timer_guard: None,
+            timeout_timer_state_tx: None
         };
 
         new_scheduler
+    }
+
+    fn start(&mut self) {
+        let (tx, rx): (Sender<SchedulerState>, Receiver<SchedulerState>) = mpsc::channel();
+
+        self.timeout_timer_state_tx = Some(tx);
+
+        if (self.task_info.timeout > 0) {
+
+            self.timeout_timer_guard = Some(self.timeout_timer.schedule_with_delay(chrono::Duration::seconds(self.task_info.timeout), move || {
+
+                match rx.try_recv() {
+                    Err(e) => {
+                        // Exit.
+                        error!("Timeout waiting for acceptable resource offer from Mesos");
+                        exit(10);
+                    },
+                    Ok(state) => {
+
+                        if state != SchedulerState::Scheduled {
+                            error!("Unexpected Scheduler state: {}", state.as_static());
+                            exit(20);
+                        }
+                    }
+
+                }
+
+            }));
+
+        }
+
     }
 
     fn is_scheduled(&self) -> bool {
@@ -379,7 +426,7 @@ impl<'a, 'b: 'a> Scheduler<'a> {
             self.agent_hostname = Some(offer.hostname.clone());
             self.agent_port = Some(offer.port.clone());
 
-            //TODO: Set more props here
+            self.timeout_timer_state_tx.as_ref().unwrap().send(SchedulerState::Scheduled);
 
         } else {
             error!("Error sending acceptance offer to mesos\n\n{}", output);
@@ -528,6 +575,7 @@ pub fn execute<'a>(mesos_host: &'a str, task_info: &'a types::RequestedTaskInfo)
                         }
 
                         let mut scheduler = Scheduler::new(&scheduler_uri, task_info, id);
+                        scheduler.start();
 
                         loop {
                             let message = network::read_next_message(&mut response);
